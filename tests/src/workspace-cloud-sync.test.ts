@@ -20,6 +20,7 @@ import {
   saveCloudChange,
   saveCloudCursor,
 } from '../../src/modules/workspace/cloud-sync.ts';
+import { applyCloudContent, uploadProjectFiles } from '../../src/modules/workspace/content-sync.ts';
 
 async function withStateDir(run: () => void | Promise<void>) {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-cloud-sync-'));
@@ -266,5 +267,62 @@ test('workspace cloud continuation is identity-bound, refs-only, and path-contai
     }), /symlink/);
     assert.equal(fs.existsSync(path.join(external, 'cloud-continuation.json')), false);
     fs.rmSync(external, { recursive: true, force: true });
+  });
+});
+
+test('workspace content sync resumes missing chunks and preserves concurrent local bytes', async () => {
+  await withStateDir(async () => {
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-content-sync-'));
+    try {
+      fs.mkdirSync(path.join(projectRoot, 'inputs'));
+      fs.writeFileSync(path.join(projectRoot, 'inputs', 'paper.txt'), 'abcdefghij');
+      const uploadedChunks: number[] = [];
+      const fetchImpl: typeof fetch = async (input, init) => {
+        const url = new URL(String(input));
+        if (init?.method === 'POST' && url.pathname.endsWith('/transfers')) {
+          return Response.json({ transferId: 'transfer-alpha', path: 'inputs/paper.txt', digest: '72399361da6a7754fec986dca5b7cbaf1c810a28ded4abaf56b2106d06cb78b0', size: 10, chunkSize: 4, chunkCount: 3, status: 'uploading' }, { status: 201 });
+        }
+        if (!init?.method && url.pathname.endsWith('/transfers/transfer-alpha')) {
+          return Response.json({ transferId: 'transfer-alpha', path: 'inputs/paper.txt', digest: '72399361da6a7754fec986dca5b7cbaf1c810a28ded4abaf56b2106d06cb78b0', size: 10, chunkSize: 4, chunkCount: 3, receivedChunks: [1], status: 'uploading' });
+        }
+        if (init?.method === 'PUT') {
+          uploadedChunks.push(Number(url.pathname.split('/').at(-1)));
+          return Response.json({ transferId: 'transfer-alpha', status: 'uploading' });
+        }
+        return Response.json({ transferId: 'transfer-alpha', path: 'inputs/paper.txt', digest: '72399361da6a7754fec986dca5b7cbaf1c810a28ded4abaf56b2106d06cb78b0', size: 10, status: 'completed' });
+      };
+      const result = await uploadProjectFiles({
+        origin: 'https://cloud.example', organizationId: 'org-alpha', workspaceId: 'workspace-alpha',
+        projectId: 'project-alpha', projectRoot, sessionCookie: 'opl_session=secret', csrfToken: 'csrf-secret', fetchImpl,
+      });
+      assert.deepEqual(uploadedChunks, [0, 2]);
+      assert.deepEqual(result, { files: 1, uploadedChunks: 2 });
+
+      const target = path.join(projectRoot, 'inputs', 'paper.txt');
+      fs.writeFileSync(target, 'local edit');
+      const remote = Buffer.from('remote edit');
+      const digest = (await import('node:crypto')).createHash('sha256').update(remote).digest('hex');
+      const applied = await applyCloudContent({
+        origin: 'https://cloud.example', workspaceId: 'workspace-alpha', projectRoot,
+        relativePath: 'inputs/paper.txt', digest, sessionCookie: 'opl_session=secret',
+        fetchImpl: async () => new Response(remote, { headers: { 'X-Content-SHA256': digest, 'X-Workspace-Path': 'inputs/paper.txt' } }),
+      });
+      assert.equal(applied.conflict, true);
+      assert.equal(fs.readFileSync(target, 'utf8'), 'local edit');
+      assert.equal(fs.readFileSync(applied.path, 'utf8'), 'remote edit');
+      assert.equal(listCloudConflicts('workspace-alpha').at(-1)?.operation, 'preserve_both');
+      await applyCloudContent({
+        origin: 'https://cloud.example', workspaceId: 'workspace-alpha', projectRoot,
+        relativePath: 'inputs/paper.txt', digest, sessionCookie: 'opl_session=secret',
+        fetchImpl: async () => new Response(remote, { headers: { 'X-Content-SHA256': digest, 'X-Workspace-Path': 'inputs/paper.txt' } }),
+      });
+      assert.equal(listCloudConflicts('workspace-alpha').length, 1);
+      await assert.rejects(() => applyCloudContent({
+        origin: 'https://cloud.example', workspaceId: 'workspace-alpha', projectRoot,
+        relativePath: '../escape', digest, sessionCookie: 'opl_session=secret', fetchImpl,
+      }), /escapes project root/);
+    } finally {
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+    }
   });
 });

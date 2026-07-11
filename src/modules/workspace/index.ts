@@ -32,4 +32,6 @@ export {
   pushCloudOutbox,
   queueCloudMutation,
   readCloudCursor,
+  saveCloudContentConflict,
 } from './cloud-sync.ts';
+export { applyCloudContent, uploadProjectFiles } from './content-sync.ts';

@@ -2,6 +2,7 @@ import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 
 import { parseJsonText } from '../../../kernel/json-file.ts';
 import {
+  applyCloudContent,
   listCloudChanges,
   listCloudConflicts,
   listPendingCloudMutations,
@@ -9,6 +10,7 @@ import {
   pushCloudOutbox,
   queueCloudMutation,
   readCloudCursor,
+  uploadProjectFiles,
 } from '../../../modules/workspace/index.ts';
 import { buildUsageError } from '../modules/support.ts';
 import type { CommandSpec } from '../modules/support.ts';
@@ -153,6 +155,46 @@ export function buildWorkspaceCloudSyncCommandSpecs(
         const spec = getCommandSpecs()['workspace sync conflicts'];
         const workspaceId = required(parseOptions(args, spec, stringOptions('workspace')), 'workspace', spec);
         return { workspace_sync: { workspace_id: workspaceId, conflicts: listCloudConflicts(workspaceId) } };
+      },
+    },
+    'workspace sync upload': {
+      usage: 'opl workspace sync upload --origin <url> --workspace <id> --organization <id> --project <id> --project-root <path> --session-cookie-env <name> --csrf-env <name>',
+      summary: 'Resume verified project file uploads into the Cloud Workspace.',
+      examples: ['opl workspace sync upload --origin https://cloud.example --workspace workspace-alpha --organization org-alpha --project project-alpha --project-root ./project --session-cookie-env OPL_CLOUD_SESSION --csrf-env OPL_CLOUD_CSRF'],
+      handler: async (args) => {
+        const spec = getCommandSpecs()['workspace sync upload'];
+        const values = parseOptions(args, spec, stringOptions(
+          'origin', 'workspace', 'organization', 'project', 'project-root', 'session-cookie-env', 'csrf-env',
+        ));
+        const sessionEnv = required(values, 'session-cookie-env', spec);
+        const csrfEnv = required(values, 'csrf-env', spec);
+        const sessionCookie = process.env[sessionEnv]?.trim();
+        const csrfToken = process.env[csrfEnv]?.trim();
+        if (!sessionCookie || !csrfToken) throw buildUsageError('workspace sync upload requires session cookie and CSRF values.', spec);
+        return { workspace_sync: { content_upload: await uploadProjectFiles({
+          origin: required(values, 'origin', spec), workspaceId: required(values, 'workspace', spec),
+          organizationId: required(values, 'organization', spec), projectId: required(values, 'project', spec),
+          projectRoot: required(values, 'project-root', spec), sessionCookie, csrfToken,
+        }) } };
+      },
+    },
+    'workspace sync apply-content': {
+      usage: 'opl workspace sync apply-content --origin <url> --workspace <id> --project-root <path> --path <relative-path> --digest <sha256> --session-cookie-env <name>',
+      summary: 'Download verified Cloud content and preserve both versions on a local conflict.',
+      examples: ['opl workspace sync apply-content --origin https://cloud.example --workspace workspace-alpha --project-root ./project --path inputs/paper.txt --digest <sha256> --session-cookie-env OPL_CLOUD_SESSION'],
+      handler: async (args) => {
+        const spec = getCommandSpecs()['workspace sync apply-content'];
+        const values = parseOptions(args, spec, stringOptions(
+          'origin', 'workspace', 'project-root', 'path', 'digest', 'session-cookie-env',
+        ));
+        const sessionEnv = required(values, 'session-cookie-env', spec);
+        const sessionCookie = process.env[sessionEnv]?.trim();
+        if (!sessionCookie) throw buildUsageError(`Environment variable ${sessionEnv} is required.`, spec);
+        return { workspace_sync: { content_apply: await applyCloudContent({
+          origin: required(values, 'origin', spec), workspaceId: required(values, 'workspace', spec),
+          projectRoot: required(values, 'project-root', spec), relativePath: required(values, 'path', spec),
+          digest: required(values, 'digest', spec), sessionCookie,
+        }) } };
       },
     },
   };

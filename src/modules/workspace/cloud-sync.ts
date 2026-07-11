@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -120,7 +120,7 @@ function normalizeCloudEvent(event: Record<string, unknown>): Record<string, unk
   for (const key of [
     'id', 'operationId', 'workspaceId', 'entityKind', 'projectId', 'taskId', 'clientId',
     'actorUserId', 'operation', 'status', 'contentDigest', 'idempotencyKey', 'requestHash',
-    'conflictId', 'occurredAt',
+    'conflictId', 'occurredAt', 'path', 'localDigest', 'remoteDigest', 'preservedPath',
   ]) {
     if (typeof event[key] === 'string') normalized[key] = event[key];
   }
@@ -282,6 +282,29 @@ function saveConflict(workspaceId: string, event: Record<string, unknown>) {
   } finally {
     db.close();
   }
+}
+
+export function saveCloudContentConflict(input: {
+  workspaceId: string;
+  path: string;
+  localDigest: string;
+  remoteDigest: string;
+  preservedPath: string;
+}) {
+  const fingerprint = [input.workspaceId, input.path, input.localDigest, input.remoteDigest].join('\0');
+  const event = {
+    conflictId: `content-${createHash('sha256').update(fingerprint).digest('hex').slice(0, 24)}`,
+    workspaceId: input.workspaceId,
+    entityKind: 'artifact',
+    operation: 'preserve_both',
+    status: 'conflict',
+    path: input.path,
+    localDigest: input.localDigest,
+    remoteDigest: input.remoteDigest,
+    preservedPath: input.preservedPath,
+  };
+  saveConflict(input.workspaceId, event);
+  return event;
 }
 
 export function listCloudConflicts(workspaceId: string): Record<string, unknown>[] {

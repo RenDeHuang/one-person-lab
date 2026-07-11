@@ -58,6 +58,16 @@ export function buildWorkspaceCommandSpecs(
           summary: 'List durable local/cloud metadata conflicts.',
         },
         {
+          command: 'workspace sync upload',
+          usage: 'opl workspace sync upload --origin <url> --workspace <id> --organization <id> --project <id> --project-root <path> --session-cookie-env <name> --csrf-env <name>',
+          summary: 'Resume verified project content uploads into Cloud.',
+        },
+        {
+          command: 'workspace sync apply-content',
+          usage: 'opl workspace sync apply-content --origin <url> --workspace <id> --project-root <path> --path <relative-path> --digest <sha256> --session-cookie-env <name>',
+          summary: 'Apply verified Cloud content locally while preserving conflicts.',
+        },
+        {
           command: 'workspace projects',
           usage: 'opl workspace projects',
           summary: 'List known project workspace bindings from the OPL workspace registry.',
@@ -143,6 +153,8 @@ export function buildWorkspaceCommandSpecs(
     'workspace sync push': cloneCommandSpec(commandSpecs['workspace sync push'], { group: 'workspace' }),
     'workspace sync pull': cloneCommandSpec(commandSpecs['workspace sync pull'], { group: 'workspace' }),
     'workspace sync conflicts': cloneCommandSpec(commandSpecs['workspace sync conflicts'], { group: 'workspace' }),
+    'workspace sync upload': cloneCommandSpec(commandSpecs['workspace sync upload'], { group: 'workspace' }),
+    'workspace sync apply-content': cloneCommandSpec(commandSpecs['workspace sync apply-content'], { group: 'workspace' }),
     'workspace root': cloneCommandSpec(commandSpecs['workspace root'], {
       usage: 'opl workspace root',
       examples: ['opl workspace root'],
