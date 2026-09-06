@@ -104,6 +104,7 @@ function createBuildFixture(root: string, target: Target, defect?: Defect) {
   const stages = provider.operations.design.required_stage_refs;
   const workflowId = (stage: string) => `fixture:${target.agent}:${stage}`;
   const gateway: FoundryProviderStageRunGateway = {
+    async cancel() {},
     async launch() {
       return { workflow_id: workflowId(stages[0]!) };
     },
@@ -139,6 +140,7 @@ function createBuildFixture(root: string, target: Target, defect?: Defect) {
   const kernel = new FoundryKernel({
     designer: new ManifestFoundryDesignerAdapter({
       checkout_root: providerRoot,
+      provider_source_digest: `sha256:${'a'.repeat(64)}`,
       provider_manifest: provider,
       invoker: new StageRunFoundryProviderInvoker({ gateway, storage_root: root }),
     }),

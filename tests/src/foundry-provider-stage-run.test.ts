@@ -6,6 +6,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 
+import { FrameworkContractError } from '../../src/kernel/contract-validation.ts';
 import { canonicalJsonBytes } from '../../src/kernel/canonical-json.ts';
 import { parseFamilyRuntimeCommand } from '../../src/adapters/execution/family-runtime-command.ts';
 import { createCordisStageRouteComposition } from '../../src/host/plugins/cordis-agent-executor-experiment.ts';
@@ -25,6 +26,8 @@ import {
 import {
   FileFoundryProviderArtifactReader,
   OplFoundryProviderStageRunGateway,
+  queryFoundryProviderStageRunHandle,
+  StageRunFoundryProviderCoordinator,
   StageRunFoundryProviderInvoker,
   type FoundryProviderStageRunGateway,
 } from '../../src/adapters/execution/foundry-provider-stage-run.ts';
@@ -101,6 +104,7 @@ for (const operation of ['design', 'diagnose'] as const) {
           captured = JSON.parse(bytes.toString('utf8'));
           throw launchBoundary;
         },
+        async cancel() {},
         async query() { throw new Error('not used'); },
       },
     });
@@ -109,6 +113,7 @@ for (const operation of ['design', 'diagnose'] as const) {
       provider: normalizeFoundryProviderManifest(declaredProvider),
       checkout_root: '/managed/another-provider',
       activity: { ...activity, phase: operation },
+      provider_source_digest: `sha256:${'a'.repeat(64)}`,
       payload: {} as never,
     }), (error) => error === launchBoundary);
     assert.ok(captured);
@@ -155,11 +160,13 @@ test('StageRun provider binds admitted source bytes to its actual initial launch
         assert.deepEqual(fs.readFileSync(new URL(input.input_artifact_refs[1]!)), bytes);
         throw stopped;
       },
+      async cancel() {},
       async query() { throw new Error('not used'); },
     },
   });
   await assert.rejects(invoker.invoke({
     operation: 'design', provider, checkout_root: '/managed/provider', activity,
+    provider_source_digest: `sha256:${'a'.repeat(64)}`,
     payload: { request: { source_refs: [sourceRef] } as never },
   }), (error) => error === stopped);
 });
@@ -175,6 +182,7 @@ test('StageRun provider rejects a report wrapping the raw terminal protocol obje
     storage_root: storageRoot,
     gateway: {
       async launch() { return { workflow_id: 'workflow:mission-intake' }; },
+      async cancel() {},
       async query(workflowId) {
         return workflowId === 'workflow:mission-intake'
           ? state({ stage: 'mission-intake', next: 'workflow:evaluation-design' })
@@ -191,6 +199,7 @@ test('StageRun provider rejects a report wrapping the raw terminal protocol obje
     operation: 'design',
     provider,
     checkout_root: '/managed/oma',
+    provider_source_digest: `sha256:${'a'.repeat(64)}`,
     payload: { request: { marker: 'request' } as never },
     activity,
   }), /exactly one schema-targeted raw output artifact/);
@@ -258,6 +267,86 @@ test('StageRun gateway forwards the Host Stagecraft composition to the runtime b
     input_artifact_hashes: [],
   });
   assert.equal(composed, true);
+});
+
+test('StageRun gateway projects authoritative Temporal failure over a stale running query', async () => {
+  const client = {
+    async withDeadline(_deadline: number, fn: () => Promise<unknown>) {
+      return fn();
+    },
+  };
+  const handle = {
+    async describe() {
+      return {
+        workflowId: 'workflow:failed-stage-run',
+        runId: 'run:failed-stage-run',
+        status: { name: 'FAILED' },
+        memo: {
+          stage_run_id: 'stage-run:failed-stage-run',
+          domain_id: 'agent_engineering',
+          stage_id: 'mission-intake',
+        },
+      };
+    },
+    async query() {
+      throw new Error('A failed workflow query would expose stale running state.');
+    },
+    async result() {
+      throw new Error('A failed workflow has no successful result.');
+    },
+  };
+
+  const result = await queryFoundryProviderStageRunHandle(client as never, handle as never);
+  assert.deepEqual(result, {
+    surface_kind: 'temporal_stage_run_query',
+    provider_kind: 'temporal',
+    stage_run_id: 'stage-run:failed-stage-run',
+    workflow_id: 'workflow:failed-stage-run',
+    run_id: 'run:failed-stage-run',
+    workflow_status: 'FAILED',
+    domain_id: 'agent_engineering',
+    stage_id: 'mission-intake',
+    status: 'failed',
+    artifact_refs: [],
+    artifact_hashes: [],
+    attempts: [],
+    next_stage_run_launch: null,
+    blocked_reason: 'temporal_stage_run_workflow_failed',
+  });
+});
+
+test('StageRun gateway reads the authoritative result after Temporal completion', async () => {
+  const terminal = state({
+    stage: 'evaluation-design',
+    refs: ['file:///terminal.json'],
+    hashes: [`sha256:${'a'.repeat(64)}`],
+  });
+  const client = {
+    async withDeadline(_deadline: number, fn: () => Promise<unknown>) {
+      return fn();
+    },
+  };
+  const handle = {
+    async describe() {
+      return {
+        workflowId: 'workflow:completed-stage-run',
+        runId: 'run:completed-stage-run',
+        status: { name: 'COMPLETED' },
+        memo: {},
+      };
+    },
+    async query() {
+      throw new Error('Completed StageRun state must come from the workflow result.');
+    },
+    async result() {
+      return terminal;
+    },
+  };
+
+  assert.equal(
+    await queryFoundryProviderStageRunHandle(client as never, handle as never),
+    terminal,
+  );
 });
 
 test('Foundry provider manifest rejects every unknown field and contradictory authority at intake', async (t) => {
@@ -366,6 +455,278 @@ function state(input: {
     updated_at: new Date().toISOString(),
   };
 }
+
+test('StageRun provider coordinator persists a pending cursor and advances one continuation per observation', async () => {
+  const queries: string[] = [];
+  let entryQueries = 0;
+  const gateway: FoundryProviderStageRunGateway = {
+    async launch() {
+      return { workflow_id: 'workflow:mission-intake' };
+    },
+    async query(workflowId) {
+      queries.push(workflowId);
+      if (workflowId === 'workflow:mission-intake' && entryQueries++ === 0) {
+        return state({
+          stage: 'mission-intake',
+          status: 'running',
+          attempts: [{
+            stage_attempt_id: 'attempt:mission-intake',
+            workflow_id: 'workflow:attempt:mission-intake',
+            status: 'running',
+          }],
+        });
+      }
+      if (workflowId === 'workflow:mission-intake') {
+        return state({ stage: 'mission-intake', next: 'workflow:evaluation-design' });
+      }
+      return state({
+        stage: 'evaluation-design',
+        refs: ['file:///terminal.json'],
+        hashes: [`sha256:${'a'.repeat(64)}`],
+      });
+    },
+    async cancel() {},
+  };
+  const coordinator = new StageRunFoundryProviderCoordinator({
+    gateway,
+    storage_root: fs.mkdtempSync(path.join(os.tmpdir(), 'opl-foundry-provider-coordinator-')),
+    artifact_reader: { readExact: () => Buffer.from('{}') },
+  });
+  const invocation = {
+    operation: 'design' as const,
+    provider,
+    checkout_root: '/managed/oma',
+    provider_source_digest: `sha256:${'a'.repeat(64)}`,
+    payload: { request: { marker: 'request' } as never },
+    activity,
+  };
+
+  const launched = await coordinator.launch(invocation, 'operation:design');
+  assert.equal(launched.status, 'pending');
+  assert.equal(launched.current_stage_id, null);
+  assert.deepEqual(launched.visited_path, []);
+
+  const running = await coordinator.observe(launched, 'operation:design');
+  assert.equal(running.status, 'pending');
+  assert.equal(running.current_workflow_id, 'workflow:mission-intake');
+  assert.equal(running.current_stage_id, 'mission-intake');
+  assert.deepEqual(running.active_attempts, [{
+    stage_attempt_id: 'attempt:mission-intake',
+    workflow_id: 'workflow:attempt:mission-intake',
+    status: 'running',
+  }]);
+
+  const continued = await coordinator.observe(running, 'operation:design');
+  assert.equal(continued.status, 'pending');
+  assert.equal(continued.current_workflow_id, 'workflow:evaluation-design');
+  assert.deepEqual(continued.visited_path, [{
+    workflow_id: 'workflow:mission-intake',
+    stage_id: 'mission-intake',
+  }]);
+  assert.deepEqual(queries, ['workflow:mission-intake', 'workflow:mission-intake']);
+
+  const terminal = await coordinator.observe(continued, 'operation:design');
+  assert.equal(terminal.status, 'terminal');
+  assert.deepEqual(terminal.artifact_refs, ['file:///terminal.json']);
+  assert.deepEqual(queries, [
+    'workflow:mission-intake',
+    'workflow:mission-intake',
+    'workflow:evaluation-design',
+  ]);
+});
+
+test('StageRun provider coordinator refuses terminal reads from a pending cursor and cancels its current StageRun', async () => {
+  const cancelled: string[] = [];
+  const gateway: FoundryProviderStageRunGateway = {
+    async launch() {
+      return { workflow_id: 'workflow:mission-intake' };
+    },
+    async query() {
+      return state({ stage: 'mission-intake', status: 'running' });
+    },
+    async cancel(workflowId) {
+      cancelled.push(workflowId);
+    },
+  };
+  const coordinator = new StageRunFoundryProviderCoordinator({
+    gateway,
+    storage_root: fs.mkdtempSync(path.join(os.tmpdir(), 'opl-foundry-provider-cancel-')),
+  });
+  const invocation = {
+    operation: 'design' as const,
+    provider,
+    checkout_root: '/managed/oma',
+    provider_source_digest: `sha256:${'a'.repeat(64)}`,
+    payload: { request: { marker: 'request' } as never },
+    activity,
+  };
+  const cursor = await coordinator.launch(invocation, 'operation:design');
+
+  await assert.rejects(
+    coordinator.readTerminal(cursor, 'operation:design'),
+    /not terminal/,
+  );
+  await coordinator.cancel(cursor, 'operation:design');
+  assert.deepEqual(cancelled, ['workflow:mission-intake']);
+});
+
+test('StageRun provider cancellation follows an already-published continuation before cancelling', async () => {
+  const queried: string[] = [];
+  const cancelled: string[] = [];
+  const gateway: FoundryProviderStageRunGateway = {
+    async launch() {
+      return { workflow_id: 'workflow:mission-intake' };
+    },
+    async query(workflowId) {
+      queried.push(workflowId);
+      return workflowId === 'workflow:mission-intake'
+        ? state({ stage: 'mission-intake', next: 'workflow:evaluation-design' })
+        : state({ stage: 'evaluation-design', status: 'running' });
+    },
+    async cancel(workflowId) {
+      cancelled.push(workflowId);
+    },
+  };
+  const coordinator = new StageRunFoundryProviderCoordinator({
+    gateway,
+    storage_root: fs.mkdtempSync(path.join(os.tmpdir(), 'opl-foundry-provider-cancel-route-')),
+  });
+  const invocation = {
+    operation: 'design' as const,
+    provider,
+    checkout_root: '/managed/oma',
+    provider_source_digest: `sha256:${'a'.repeat(64)}`,
+    payload: { request: { marker: 'request' } as never },
+    activity,
+  };
+  const cursor = await coordinator.launch(invocation, 'operation:design');
+  const cancelledCursor = await coordinator.cancel(cursor, 'operation:design');
+
+  assert.deepEqual(queried, ['workflow:mission-intake', 'workflow:evaluation-design']);
+  assert.deepEqual(cancelled, ['workflow:evaluation-design']);
+  assert.equal(cancelledCursor.current_workflow_id, 'workflow:evaluation-design');
+});
+
+test('StageRun provider coordinator rejects a cursor from another immutable operation', async () => {
+  const gateway: FoundryProviderStageRunGateway = {
+    async launch() {
+      return { workflow_id: 'workflow:mission-intake' };
+    },
+    async query() {
+      throw new Error('query must not run for a mismatched cursor');
+    },
+    async cancel() {
+      throw new Error('cancel must not run for a mismatched cursor');
+    },
+  };
+  const coordinator = new StageRunFoundryProviderCoordinator({
+    gateway,
+    storage_root: fs.mkdtempSync(path.join(os.tmpdir(), 'opl-foundry-provider-binding-')),
+  });
+  const invocation = {
+    operation: 'design' as const,
+    provider,
+    checkout_root: '/managed/oma',
+    provider_source_digest: `sha256:${'a'.repeat(64)}`,
+    payload: { request: { marker: 'request' } as never },
+    activity,
+  };
+  const cursor = await coordinator.launch(invocation, 'operation:design');
+
+  await assert.rejects(coordinator.observe(cursor, 'operation:other'), /does not bind/);
+  await assert.rejects(coordinator.cancel(cursor, 'operation:other'), /does not bind/);
+  await assert.rejects(
+    coordinator.observe({ ...cursor, provider_manifest: null as never }, 'operation:design'),
+    FrameworkContractError,
+  );
+  await assert.rejects(
+    coordinator.readTerminal({
+      ...cursor,
+      status: 'terminal',
+      artifact_refs: ['file:///result.json'],
+      artifact_hashes: [],
+    }, 'operation:design'),
+    /does not bind/,
+  );
+});
+
+test('StageRun provider terminal read persists one exact replay result without relaunching', async () => {
+  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-foundry-provider-replay-'));
+  const output = canonicalJsonBytes({
+    surface_kind: 'opl_foundry_agent_blueprint',
+    marker: 'persisted-terminal-output',
+    content_refs: {
+      prompt_refs: [],
+      skill_refs: [],
+      knowledge_refs: [],
+      helper_refs: [],
+      model_refs: [],
+      tool_refs: [],
+      schema_refs: [],
+    },
+  });
+  let launches = 0;
+  const gateway: FoundryProviderStageRunGateway = {
+    async launch() {
+      launches += 1;
+      return { workflow_id: 'workflow:mission-intake' };
+    },
+    async query(workflowId) {
+      return workflowId === 'workflow:mission-intake'
+        ? state({ stage: 'mission-intake', next: 'workflow:evaluation-design' })
+        : state({
+            stage: 'evaluation-design',
+            refs: ['file:///terminal.json'],
+            hashes: [`sha256:${sha256(output)}`],
+          });
+    },
+    async cancel() {},
+  };
+  const coordinator = new StageRunFoundryProviderCoordinator({
+    gateway,
+    storage_root: storageRoot,
+    artifact_reader: { readExact: () => output },
+  });
+  const invocation = {
+    operation: 'design' as const,
+    provider,
+    checkout_root: '/managed/oma',
+    provider_source_digest: `sha256:${'a'.repeat(64)}`,
+    payload: { request: { marker: 'request' } as never },
+    activity,
+  };
+  let cursor = await coordinator.launch(invocation, 'operation:design');
+  cursor = await coordinator.observe(cursor, 'operation:design');
+  cursor = await coordinator.observe(cursor, 'operation:design');
+  await coordinator.readTerminal(cursor, 'operation:design');
+
+  const replayInvoker = new StageRunFoundryProviderInvoker({
+    gateway,
+    storage_root: storageRoot,
+    artifact_reader: { readExact: () => output },
+    operation_key: 'operation:design',
+  });
+  const replay = await replayInvoker.invoke(invocation) as Record<string, unknown>;
+  assert.equal(replay.marker, 'persisted-terminal-output');
+  await assert.rejects(
+    replayInvoker.invoke({
+      ...invocation,
+      provider_source_digest: `sha256:${'b'.repeat(64)}`,
+    }),
+    /does not bind the immutable provider invocation/,
+  );
+  await assert.rejects(
+    new StageRunFoundryProviderInvoker({
+      gateway,
+      storage_root: storageRoot,
+      artifact_reader: { readExact: () => output },
+      operation_key: 'operation:other',
+      replay_only: true,
+    }).invoke(invocation),
+    /does not bind the immutable provider invocation/,
+  );
+  assert.equal(launches, 1);
+});
 
 const CONTENT_KINDS = ['prompt', 'skill', 'knowledge', 'helper', 'model', 'tool', 'schema'] as const;
 
@@ -500,6 +861,7 @@ test('StageRun provider invocation follows declared Stages even when observation
       launches.push(input);
       return { workflow_id: 'workflow:mission-intake' };
     },
+    async cancel() {},
     async query(workflowId) {
       return workflowId === 'workflow:mission-intake'
         ? state({ stage: 'mission-intake', next: 'workflow:evaluation-design' })
@@ -525,6 +887,7 @@ test('StageRun provider invocation follows declared Stages even when observation
     operation: 'design',
     provider,
     checkout_root: '/managed/oma',
+    provider_source_digest: `sha256:${'a'.repeat(64)}`,
     payload: { request: { marker: 'request' } as never },
     activity,
   });
@@ -544,6 +907,7 @@ test('StageRun provider preserves observation history across retries and reports
     async launch() {
       return { workflow_id: 'workflow:mission-intake' };
     },
+    async cancel() {},
     async query() {
       return state({
         stage: 'mission-intake',
@@ -564,6 +928,7 @@ test('StageRun provider preserves observation history across retries and reports
     operation: 'design',
     provider,
     checkout_root: '/managed/oma',
+    provider_source_digest: `sha256:${'a'.repeat(64)}`,
     payload: { request: { marker: 'request' } as never },
     activity,
   }), (error: Error) => {
@@ -590,11 +955,115 @@ test('StageRun provider preserves observation history across retries and reports
   assert.equal(receipt.observations[0].attempt.stage_attempt_id, 'sat_mission_intake_producer_0');
   await assert.rejects(invoker.invoke({
     operation: 'design', provider, checkout_root: '/managed/oma',
+    provider_source_digest: `sha256:${'a'.repeat(64)}`,
     payload: { request: { marker: 'request' } as never }, activity,
   }));
   const retried = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
   assert.deepEqual(retried.observations[0], receipt.observations[0]);
   assert.ok(retried.observations.length >= receipt.observations.length);
+});
+
+test('StageRun provider Coordinator accumulates bound observations across coordinator instances', async (t) => {
+  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-foundry-coordinator-observations-'));
+  t.after(() => fs.rmSync(storageRoot, { recursive: true, force: true }));
+  let launches = 0;
+  let continueStage = false;
+  const gateway: FoundryProviderStageRunGateway = {
+    async launch() {
+      launches += 1;
+      return { workflow_id: 'workflow:mission-intake' };
+    },
+    async cancel() {},
+    async query(workflowId) {
+      if (workflowId === 'workflow:evaluation-design') {
+        return state({ stage: 'evaluation-design' });
+      }
+      return continueStage
+        ? state({ stage: 'mission-intake', next: 'workflow:evaluation-design' })
+        : state({ stage: 'mission-intake', status: 'running' });
+    },
+  };
+  const firstCoordinator = new StageRunFoundryProviderCoordinator({ gateway, storage_root: storageRoot });
+  const invocation = {
+    operation: 'design' as const,
+    provider,
+    checkout_root: '/managed/oma',
+    provider_source_digest: `sha256:${'a'.repeat(64)}`,
+    payload: { request: { marker: 'request' } as never },
+    activity,
+  };
+  const launched = await firstCoordinator.launch(invocation, 'operation:direct-observation');
+  const running = await firstCoordinator.observe(launched, launched.operation_key);
+  const receiptFile = path.join(storageRoot, 'provider-observations', `${running.activity_key}.json`);
+  const firstReceipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
+  assert.equal(firstReceipt.version, 'opl-foundry-provider-stage-run-observation.v2');
+  assert.deepEqual(firstReceipt.binding, {
+    cursor_version: running.version,
+    operation_key: running.operation_key,
+    operation: 'design',
+    activity_key: running.activity_key,
+    provider_id: provider.provider_id,
+    provider_manifest_digest: foundryContentDigest(provider),
+    provider_source_digest: invocation.provider_source_digest,
+    checkout_root: path.resolve(invocation.checkout_root),
+  });
+  assert.equal(firstReceipt.observations.length, 1);
+
+  continueStage = true;
+  const secondCoordinator = new StageRunFoundryProviderCoordinator({ gateway, storage_root: storageRoot });
+  const continued = await secondCoordinator.observe(running, running.operation_key);
+  const terminal = await new StageRunFoundryProviderCoordinator({ gateway, storage_root: storageRoot })
+    .observe(continued, continued.operation_key);
+  assert.equal(terminal.status, 'terminal');
+  const finalReceipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
+  assert.deepEqual(finalReceipt.binding, firstReceipt.binding);
+  assert.deepEqual(finalReceipt.observations[0], firstReceipt.observations[0]);
+  assert.deepEqual(finalReceipt.observations.map((entry: { stage_id: string }) => entry.stage_id), [
+    'mission-intake', 'mission-intake', 'evaluation-design',
+  ]);
+  assert.equal(launches, 1);
+});
+
+test('StageRun provider Coordinator reports blocked diagnostics and the exact persisted observation receipt', async (t) => {
+  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-foundry-coordinator-blocked-'));
+  t.after(() => fs.rmSync(storageRoot, { recursive: true, force: true }));
+  const gateway: FoundryProviderStageRunGateway = {
+    async launch() { return { workflow_id: 'workflow:mission-intake' }; },
+    async cancel() {},
+    async query() {
+      return state({
+        stage: 'mission-intake',
+        status: 'blocked',
+        blockedReason: 'codex_cli_provider_unavailable',
+        attempts: [{
+          attempt_role: 'producer',
+          stage_attempt_id: 'sat_direct_coordinator_producer_0',
+          status: 'blocked',
+        }],
+      });
+    },
+  };
+  const coordinator = new StageRunFoundryProviderCoordinator({ gateway, storage_root: storageRoot });
+  const cursor = await coordinator.launch({
+    operation: 'design',
+    provider,
+    checkout_root: '/managed/oma',
+    provider_source_digest: `sha256:${'a'.repeat(64)}`,
+    payload: { request: { marker: 'request' } as never },
+    activity,
+  }, 'operation:direct-blocked');
+  const receiptFile = path.join(storageRoot, 'provider-observations', `${cursor.activity_key}.json`);
+  await assert.rejects(coordinator.observe(cursor, cursor.operation_key), (error: Error) => {
+    assert.match(error.message, /codex_cli_provider_unavailable/);
+    assert.match(error.message, /sat_direct_coordinator_producer_0/);
+    assert.ok(error.message.includes(pathToFileURL(receiptFile).href));
+    return true;
+  });
+  const receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
+  assert.equal(receipt.binding.operation_key, cursor.operation_key);
+  assert.equal(receipt.status, 'blocked');
+  assert.equal(receipt.observations.length, 1);
+  assert.equal(receipt.observations[0].attempt.stage_attempt_id, 'sat_direct_coordinator_producer_0');
 });
 
 test('StageRun provider transports all seven exact content classes into a compiler-complete candidate', async (t) => {
@@ -615,6 +1084,7 @@ test('StageRun provider transports all seven exact content classes into a compil
     async launch() {
       return { workflow_id: 'workflow:mission-intake' };
     },
+    async cancel() {},
     async query(workflowId) {
       return workflowId === 'workflow:mission-intake'
         ? state({ stage: 'mission-intake', next: 'workflow:evaluation-design' })
@@ -630,6 +1100,7 @@ test('StageRun provider transports all seven exact content classes into a compil
     operation: 'design',
     provider,
     checkout_root: '/managed/provider',
+    provider_source_digest: `sha256:${'a'.repeat(64)}`,
     payload: { request: { marker: 'request' } as never },
     activity,
   }) as AgentBlueprint;
@@ -673,6 +1144,7 @@ test('StageRun provider requires current terminal SHA transport even when exact 
     async launch() {
       return { workflow_id: 'workflow:mission-intake' };
     },
+    async cancel() {},
     async query(workflowId) {
       return workflowId === 'workflow:mission-intake'
         ? state({ stage: 'mission-intake', next: 'workflow:evaluation-design' })
@@ -689,6 +1161,7 @@ test('StageRun provider requires current terminal SHA transport even when exact 
     operation: 'design',
     provider,
     checkout_root: '/managed/provider',
+    provider_source_digest: `sha256:${'a'.repeat(64)}`,
     payload: { request: { marker: 'request' } as never },
     activity,
   }), /did not transport bytes for a content-addressed AgentBlueprint ref/);
@@ -699,6 +1172,7 @@ test('StageRun provider invocation fails closed when a required semantic Stage i
     async launch() {
       return { workflow_id: 'workflow:evaluation-design' };
     },
+    async cancel() {},
     async query() {
       return state({
         stage: 'evaluation-design',
@@ -719,6 +1193,7 @@ test('StageRun provider invocation fails closed when a required semantic Stage i
     operation: 'design',
     provider,
     checkout_root: '/managed/oma',
+    provider_source_digest: `sha256:${'a'.repeat(64)}`,
     payload: { request: { marker: 'request' } as never },
     activity,
   }), /skipped required semantic Stages/);
@@ -755,6 +1230,7 @@ test('default provider transport cannot read artifacts outside the Foundry stora
     async launch() {
       return { workflow_id: 'workflow:mission-intake' };
     },
+    async cancel() {},
     async query(workflowId) {
       return workflowId === 'workflow:mission-intake'
         ? state({ stage: 'mission-intake', next: 'workflow:evaluation-design' })
@@ -770,6 +1246,7 @@ test('default provider transport cannot read artifacts outside the Foundry stora
     operation: 'design',
     provider,
     checkout_root: '/managed/provider',
+    provider_source_digest: `sha256:${'a'.repeat(64)}`,
     payload: { request: { marker: 'request' } as never },
     activity,
   }), /outside the allowed immutable transport boundary/);

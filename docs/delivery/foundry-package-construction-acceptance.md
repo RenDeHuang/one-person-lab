@@ -25,6 +25,9 @@ divergent local runtime or its recovery implementation:
 | Managed Attempt content | Manifest, policy and rubric refs lacked readable content | Hydrate their exact SHA/size-bound UTF-8 bytes into producer/reviewer input |
 | Re-review | Nested closure field names were unspecified to the model | Project the machine contract with existing `status`/`summary` fields, without renaming the runtime protocol |
 | Package verification | Compiler tests did not establish this combined admission path | Build two different target packages through the real Kernel and persist/read back materialization records |
+| Professional Skills | Native marketplace content overrode an explicit developer source | Bind projection bytes to the selected developer checkout; reject an invalid override |
+| Reviewer snapshot | Producer lacked the canonical request contract and fixed identity; bound external inputs could not be frozen | Supply the existing schema and immutable StageRun input inventory; copy only explicitly selected, exact-bound bytes |
+| Long provider operations | All design Stages shared one polling Activity deadline | Reuse durable launch/observe/read-terminal/cancel coordination with a generation-bound cursor and workflow timers |
 
 No target-specific compiler, receipt issuer, source-binding registry, evaluator,
 activation mode, or recovery state machine is introduced. Existing strict raw
@@ -45,6 +48,11 @@ scripts/run-with-repo-temp-env.sh node --experimental-strip-types --test \
   tests/src/standard-agent-action-runtime.test.ts \
   tests/src/standard-agent-managed-checkout.test.ts \
   tests/src/stage-quality-finding-closure-prompt-contract.test.ts
+scripts/run-with-repo-temp-env.sh node --experimental-strip-types --test \
+  tests/src/reviewer-snapshot-authoring.test.ts \
+  tests/src/family-runtime-review-transport.test.ts \
+  tests/src/foundry-temporal.test.ts \
+  tests/src/temporal-activity-projection.test.ts
 scripts/verify.sh smoke
 npm run typecheck
 npm run build
@@ -85,8 +93,17 @@ fully installed runtime, and read the actual candidate event and object record.
 An upstream default-provider fixture uses OMA 0.4.0; it is not evidence of a live
 OMA 0.4.9 execution.
 
-The upstream synchronous provider still has a 28-minute observation deadline and
-its Temporal activity a 30-minute limit. Long multi-Stage runs can exceed them.
-Stage recovery also does not resume an already failed FoundryRun. These remain
-explicit follow-up work in #181, not silently fixed by increasing deadlines,
-rewriting ledger terminal states, or importing the historical local coordinator.
+The production provider now separates short launch/observe/read-terminal
+Activities from durable workflow waiting. The compatibility synchronous Invoker
+retains its bounded deadline; production no longer holds that Activity open
+across all Stages. Cursor identity binds the request, generation, provider source
+and manifest; restart/continue-as-new must not relaunch semantic generation.
+This is normal execution, not recovery of an already failed FoundryRun.
+
+A real pre-fix run reached formal design-basis Review, then quarantined because
+the producer had not supplied an immutable reviewer input snapshot. It ended
+before the declared terminal Stage; this is not evidence of a timeout. The
+snapshot correction keeps producer-selected scope, exact input identities,
+immutable review bytes and independent quality authority. No missing snapshot
+is converted into a quality pass. A fresh successful live materialization
+receipt remains required; focused tests alone do not establish it.

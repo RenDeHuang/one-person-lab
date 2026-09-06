@@ -1,9 +1,14 @@
 import { Context, heartbeat } from '@temporalio/activity';
 
 export {
+  foundryAuthorizeCancelRunActivity,
   foundryAdvanceRunActivity,
+  foundryCancelProviderOperationActivity,
   foundryCancelRunActivity,
   foundryFailRunActivity,
+  foundryLaunchProviderOperationActivity,
+  foundryObserveProviderOperationActivity,
+  foundryReadProviderOperationTerminalActivity,
   foundryStartRunActivity,
   foundrySubmitOwnerDecisionActivity,
 } from './foundry-temporal-activities.ts';
@@ -72,6 +77,7 @@ import {
 } from './family-runtime-stage-quality-context-manifest.ts';
 import {
   resolveReviewerInputSnapshotMaterialization,
+  reviewerSnapshotStageRunInputAuthority,
   type ReviewerInputSnapshotAuthorityBinding,
 } from './family-runtime-reviewer-input-snapshot.ts';
 import {
@@ -265,6 +271,7 @@ function exactRefsFromCloseoutMetadata(value: unknown) {
 function reviewerSnapshotAuthorityBinding(
   db: ReturnType<typeof openQueueDb>['db'],
   artifactProducerAttemptRef: string,
+  stageRun: ReturnType<typeof requireTemporalStageRunWorkflowInputLaunchable>,
 ): ReviewerInputSnapshotAuthorityBinding {
   const producer = getStageAttemptRow(
     db,
@@ -302,7 +309,9 @@ function reviewerSnapshotAuthorityBinding(
     >['spec'],
     declared_stage_ids: declaredStageIds,
   });
-  if (executionBinding.binding_sha256 !== bindingSha256) {
+  if (executionBinding.binding_sha256 !== bindingSha256
+    || producer.stage_run_id !== stageRun.stage_run_id
+    || executionBinding.parent_stage_run_spec_sha256 !== stageRun.stage_run_spec_sha256) {
     throw new FrameworkContractError(
       'contract_shape_invalid',
       'Reviewer snapshot authority does not match the persisted producer Attempt binding.',
@@ -326,6 +335,7 @@ function reviewerSnapshotAuthorityBinding(
     owner_authority_refs: exactRefsFromCloseoutMetadata(
       producerCloseout.closeout_ref_metadata,
     ),
+    stage_run_input_authority_refs: reviewerSnapshotStageRunInputAuthority(stageRun.stage_run_spec),
   };
 }
 
@@ -1569,7 +1579,7 @@ export async function stageQualityAttemptMaterializeActivity(
       ? input.attempt_role
       : null;
     const snapshotAuthorityBinding = reviewAttemptRole
-      ? reviewerSnapshotAuthorityBinding(db, artifactProducerAttemptRef!)
+      ? reviewerSnapshotAuthorityBinding(db, artifactProducerAttemptRef!, stageRun)
       : null;
     const reviewInputSnapshotContext = reviewAttemptRole
       ? buildStageReviewInputSnapshotContext({
