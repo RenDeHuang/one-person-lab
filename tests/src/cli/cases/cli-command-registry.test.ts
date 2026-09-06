@@ -107,6 +107,7 @@ const registryCases = [
   ['update check', 'update_check', [], 'OPL Base'],
   ['update plan', 'update_plan', [], 'OPL Base'],
   ['update apply', 'update_apply', [], 'OPL Base'],
+  ['update activate', 'update_activate', [], 'OPL Base'],
   ['update repair', 'update_repair', ['receipt'], 'OPL Base'],
   ['update rollback', 'update_rollback', [], 'OPL Base'],
 ] as const;

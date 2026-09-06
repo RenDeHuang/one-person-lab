@@ -13,6 +13,7 @@ import {
   test,
 } from '../helpers.ts';
 import { resolveEngineActionSpec } from '../../../../src/adapters/integration/system-installation/engine-helpers.ts';
+import { codexProtocolFixture } from './system-startup-maintenance-cases/codex-protocol-fixture.ts';
 import { parseOplEngineArgs } from '../../../../src/entrypoints/cli/modules/support.ts';
 
 function parseRuntimeCodexUpdateReceipt(stdout: string) {
@@ -65,7 +66,7 @@ function writeFakeNpmRuntimeInstaller(fakeNpm: string, logPath: string) {
       '  vendor_root="$prefix/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin"',
       '  mkdir -p "$package_root"',
       '  mkdir -p "$vendor_root/bin" "$vendor_root/codex-path"',
-      '  printf \'%s\\n\' \'#!/usr/bin/env bash\' \'echo "codex-cli 0.134.0"\' > "$vendor_root/bin/codex"',
+      `  printf '%s' ${shellSingleQuote(codexProtocolFixture())} > "$vendor_root/bin/codex"`,
       '  printf \'%s\\n\' \'#!/usr/bin/env bash\' \'echo "rg new"\' > "$vendor_root/codex-path/rg"',
       '  chmod +x "$vendor_root/bin/codex" "$vendor_root/codex-path/rg"',
       '  echo "installed staged @openai/codex@latest"',
@@ -118,7 +119,7 @@ function writePreseededCodexTarballs(fixtureRoot: string) {
       cpu: ['arm64'],
     }, null, 2),
   );
-  fs.writeFileSync(path.join(vendorRoot, 'bin', 'codex'), '#!/usr/bin/env bash\necho "codex-cli 0.141.0"\n', {
+  fs.writeFileSync(path.join(vendorRoot, 'bin', 'codex'), codexProtocolFixture('0.141.0'), {
     mode: 0o755,
   });
   fs.writeFileSync(path.join(vendorRoot, 'codex-path', 'rg'), '#!/usr/bin/env bash\necho "rg preseeded"\n', {
@@ -419,7 +420,7 @@ test('builtin Codex install explicitly materializes missing npm platform package
       '  if [[ "$4" == "@openai/codex-darwin-arm64@npm:@openai/codex@0.141.0-darwin-arm64" ]]; then',
       '    vendor_root="$prefix/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin"',
       '    mkdir -p "$vendor_root/bin" "$vendor_root/codex-path"',
-      '    printf \'%s\\n\' \'#!/usr/bin/env bash\' \'echo "codex-cli 0.141.0"\' > "$vendor_root/bin/codex"',
+      `    printf '%s' ${shellSingleQuote(codexProtocolFixture('0.141.0'))} > "$vendor_root/bin/codex"`,
       '    printf \'%s\\n\' \'#!/usr/bin/env bash\' \'echo "rg explicit-platform"\' > "$vendor_root/codex-path/rg"',
       '    chmod +x "$vendor_root/bin/codex" "$vendor_root/codex-path/rg"',
       '    echo "installed explicit platform package"',
@@ -520,7 +521,7 @@ test('builtin Codex install materializes Linux arm64 platform package when runni
       '  if [[ "$4" == "@openai/codex-linux-arm64@npm:@openai/codex@0.141.0-linux-arm64" ]]; then',
       '    vendor_root="$prefix/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl"',
       '    mkdir -p "$vendor_root/bin" "$vendor_root/codex-path"',
-      '    printf \'%s\\n\' \'#!/usr/bin/env bash\' \'echo "codex-cli 0.141.0"\' > "$vendor_root/bin/codex"',
+      `    printf '%s' ${shellSingleQuote(codexProtocolFixture('0.141.0'))} > "$vendor_root/bin/codex"`,
       '    printf \'%s\\n\' \'#!/usr/bin/env bash\' \'echo "rg linux-arm64"\' > "$vendor_root/codex-path/rg"',
       '    chmod +x "$vendor_root/bin/codex" "$vendor_root/codex-path/rg"',
       '    echo "installed explicit linux arm64 platform package"',

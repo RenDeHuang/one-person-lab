@@ -2,6 +2,7 @@ import { assert, fs, os, path, runCli, shellSingleQuote, test } from '../helpers
 import { runGitFixtureCommand } from '../helpers-parts/family-fixtures.ts';
 import { withCliTimeout } from './system-startup-maintenance-cases/shared.ts';
 import { rollbackCodexRuntimeGeneration } from '../../../../src/adapters/integration/system-installation/engine-helpers.ts';
+import { codexProtocolFixture } from './system-startup-maintenance-cases/codex-protocol-fixture.ts';
 
 function writeFakeNpmRuntimeInstaller(fakeNpm: string, logPath: string) {
   fs.writeFileSync(
@@ -22,7 +23,7 @@ function writeFakeNpmRuntimeInstaller(fakeNpm: string, logPath: string) {
       '  vendor_root="$prefix/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin"',
       '  mkdir -p "$package_root"',
       '  mkdir -p "$vendor_root/bin" "$vendor_root/codex-path"',
-      '  printf \'%s\\n\' \'#!/usr/bin/env bash\' \'echo "codex-cli 0.134.0"\' > "$vendor_root/bin/codex"',
+      `  printf '%s' ${shellSingleQuote(codexProtocolFixture())} > "$vendor_root/bin/codex"`,
       '  printf \'%s\\n\' \'#!/usr/bin/env bash\' \'echo "rg staged"\' > "$vendor_root/codex-path/rg"',
       '  chmod +x "$vendor_root/bin/codex" "$vendor_root/codex-path/rg"',
       '  echo "installed staged @openai/codex@latest"',

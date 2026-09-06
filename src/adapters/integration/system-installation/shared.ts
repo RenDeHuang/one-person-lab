@@ -95,7 +95,7 @@ export type OplShellActionSpec = {
   strategy: 'env_override' | 'builtin' | 'manual_required';
   command_preview: string[];
   note: string | null;
-  executable: ((cwd?: string) => CommandResult) | null;
+  executable: ((cwd?: string) => CommandResult | Promise<CommandResult>) | null;
 };
 
 export type OplInitializeSectionId =

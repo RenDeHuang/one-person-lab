@@ -4,6 +4,7 @@ import type { ManagedUpdateOperation } from '../../../../adapters/integration/ma
 import type { FrameworkContracts } from '../../../../kernel/types.ts';
 import { parseRegisteredCommandOptions } from '../../modules/support.ts';
 import type { CommandSpec } from '../../modules/support.ts';
+import { activatePendingRuntimeGenerations } from '../../../../adapters/integration/system-installation/runtime-activation.ts';
 
 function buildUpdateSpec(
   operation: ManagedUpdateOperation,
@@ -37,7 +38,18 @@ function buildUpdateSpec(
 export function buildUpdateCommandSpecs(
   getContracts: () => FrameworkContracts,
 ): Record<string, CommandSpec> {
+  const activateSpec: CommandSpec = {
+    usage: 'opl update activate',
+    summary: 'Activate verified pending Codex and Framework generations offline before starting the App runtime.',
+    examples: ['opl update activate --json'],
+    group: 'update',
+    handler: async (args) => {
+      parseRegisteredCommandOptions('update activate', args, activateSpec);
+      return activatePendingRuntimeGenerations();
+    },
+  };
   return {
+    'update activate': activateSpec,
     'update status': buildUpdateSpec(
       'status',
       'opl update status',

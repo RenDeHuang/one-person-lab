@@ -71,7 +71,7 @@ export async function runOplEngineAction(
     };
   }
 
-  const result = spec.executable();
+  const result = await spec.executable();
   if (result.exitCode !== 0) {
     const runtimeUpdate = parseRuntimeUpdateReceipt(result.stderr);
     throw new FrameworkContractError(
