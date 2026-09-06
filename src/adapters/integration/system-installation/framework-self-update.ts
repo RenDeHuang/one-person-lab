@@ -27,6 +27,7 @@ import {
   readFrameworkChannelEntry,
 } from './framework-self-update-parts/channel-artifact.ts';
 import { resolveDockerWebuiFrameworkCarrier } from './framework-self-update-parts/docker-webui-carrier.ts';
+import { frameworkGenerationDigest, isDeveloperRuntimePath } from './pending-runtime-integrity.ts';
 
 type FrameworkDependencyInstall = {
   required: boolean;
@@ -105,6 +106,7 @@ type FrameworkPendingMetadata = {
   copied_file_count: number;
   staged_at: string;
   staging_process_instance_id: string;
+  generation_sha256: string;
 };
 
 function pathsReferToSameLocation(left: string, right: string) {
@@ -358,7 +360,7 @@ function frameworkSourceAlreadyCurrent(targetRoot: string, input: {
   );
 }
 
-function stageFrameworkForRestart(targetRoot: string, stageRoot: string, metadata: Omit<FrameworkPendingMetadata, 'surface_kind' | 'target_root' | 'pending_root' | 'staged_at' | 'staging_process_instance_id'>) {
+function stageFrameworkForRestart(targetRoot: string, stageRoot: string, metadata: Omit<FrameworkPendingMetadata, 'surface_kind' | 'target_root' | 'pending_root' | 'staged_at' | 'staging_process_instance_id' | 'generation_sha256'>) {
   const pendingRoot = `${targetRoot}${FRAMEWORK_PENDING_ROOT_SUFFIX}`;
   const pendingMetadataPath = `${targetRoot}${FRAMEWORK_PENDING_METADATA_SUFFIX}`;
   fs.rmSync(pendingRoot, { recursive: true, force: true });
@@ -370,6 +372,7 @@ function stageFrameworkForRestart(targetRoot: string, stageRoot: string, metadat
     ...metadata,
     staged_at: new Date().toISOString(),
     staging_process_instance_id: currentProcessInstanceId(),
+    generation_sha256: frameworkGenerationDigest(pendingRoot),
   };
   const tempPath = `${pendingMetadataPath}.${process.pid}.tmp`;
   fs.writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
@@ -384,6 +387,14 @@ export function activatePendingOplFrameworkRuntime(targetRootInput: string) {
   if (!fs.existsSync(pendingMetadataPath) && !fs.existsSync(pendingRoot)) {
     return { surface_kind: 'opl_framework_generation_activation.v1', status: 'no_pending_generation', target_root: targetRoot };
   }
+  if (isDeveloperRuntimePath(targetRoot) || (fs.existsSync(targetRoot) && (
+    fs.lstatSync(targetRoot).isSymbolicLink() || isDeveloperRuntimePath(fs.realpathSync(targetRoot))
+  )) || resolveFrameworkUpdateSource()) {
+    return {
+      surface_kind: 'opl_framework_generation_activation.v1', status: 'manual_required',
+      reason: 'framework_activation_developer_source_protected', target_root: targetRoot,
+    };
+  }
   let pending: FrameworkPendingMetadata;
   try {
     const payload = readJsonPayloadFile(pendingMetadataPath);
@@ -396,11 +407,18 @@ export function activatePendingOplFrameworkRuntime(targetRootInput: string) {
       error: error instanceof Error ? error.message : String(error),
     };
   }
-  if (path.resolve(pending.pending_root) !== path.resolve(pendingRoot)
+  if (typeof pending.pending_root !== 'string' || path.resolve(pending.pending_root) !== path.resolve(pendingRoot)
     || pending.target_root !== targetRoot || !fs.existsSync(pendingRoot) || !isOplFrameworkRoot(pendingRoot)) {
     return {
       surface_kind: 'opl_framework_generation_activation.v1', status: 'manual_required',
       reason: 'framework_pending_generation_invalid', target_root: targetRoot, pending_root: pendingRoot,
+    };
+  }
+  if (fs.lstatSync(pendingRoot).isSymbolicLink() || isDeveloperRuntimePath(pendingRoot)
+    || !pending.generation_sha256 || frameworkGenerationDigest(pendingRoot) !== pending.generation_sha256) {
+    return {
+      surface_kind: 'opl_framework_generation_activation.v1', status: 'manual_required',
+      reason: 'framework_pending_generation_verification_failed', target_root: targetRoot, pending_root: pendingRoot,
     };
   }
   if (pending.staging_process_instance_id === currentProcessInstanceId()) {
@@ -411,17 +429,23 @@ export function activatePendingOplFrameworkRuntime(targetRootInput: string) {
     };
   }
   const activation = activateFrameworkStage(targetRoot, pendingRoot);
-  const metadataRef = writeFrameworkSourceMetadata({
-    targetRoot,
-    sourceRoot: pending.source_root,
-    sourceHeadSha: pending.source_head_sha,
-    sourceArchive: pending.source_archive,
-    sourceArchiveSha256: pending.source_archive_sha256,
-    previousRoot: activation.previousRoot,
-    rollbackRef: activation.rollbackRef,
-    copiedFileCount: pending.copied_file_count,
-  });
-  fs.rmSync(pendingMetadataPath, { force: true });
+  let metadataRef: string;
+  try {
+    metadataRef = writeFrameworkSourceMetadata({
+      targetRoot,
+      sourceRoot: pending.source_root,
+      sourceHeadSha: pending.source_head_sha,
+      sourceArchive: pending.source_archive,
+      sourceArchiveSha256: pending.source_archive_sha256,
+      previousRoot: activation.previousRoot,
+      rollbackRef: activation.rollbackRef,
+      copiedFileCount: pending.copied_file_count,
+    });
+    fs.rmSync(pendingMetadataPath, { force: true });
+  } catch (error) {
+    rollbackFrameworkRoot(targetRoot, activation.previousRoot);
+    throw error;
+  }
   return {
     surface_kind: 'opl_framework_generation_activation.v1', status: 'activated', target_root: targetRoot,
     previous_root: activation.previousRoot, rollback_ref: activation.rollbackRef, metadata_ref: metadataRef,
@@ -536,7 +560,9 @@ function pendingFrameworkArtifactResult(targetRoot: string, input: {
     if (!sameArtifact
       || pending.target_root !== targetRoot
       || path.resolve(pending.pending_root) !== path.resolve(pendingRoot)
-      || !isOplFrameworkRoot(pendingRoot)) return null;
+      || !isOplFrameworkRoot(pendingRoot)
+      || !pending.generation_sha256
+      || frameworkGenerationDigest(pendingRoot) !== pending.generation_sha256) return null;
     return buildResult('skipped', 'framework_runtime_artifact_pending_restart', {
       target_root: targetRoot,
       source_root: pending.source_root,

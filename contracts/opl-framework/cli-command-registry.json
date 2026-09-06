@@ -3078,6 +3078,39 @@
         "surface": "opl_base_update_lifecycle"
       }
     },
+    "update_activate": {
+      "command_id": "update activate",
+      "owner": "OPL Base",
+      "parser_adapter": "node_util_parse_args",
+      "options": [],
+      "output_schema": {
+        "type": "object",
+        "required": ["version", "runtime_activation"],
+        "additionalProperties": true,
+        "properties": {
+          "version": { "const": "g2" },
+          "runtime_activation": {
+            "type": "object",
+            "required": ["status", "codex", "framework"],
+            "additionalProperties": true,
+            "properties": {
+              "status": { "enum": ["activated", "no_pending_generation", "deferred_same_app_instance", "manual_required", "failed", "lock_contended"] },
+              "codex": { "type": "object", "required": ["status"], "additionalProperties": true },
+              "framework": { "type": "object", "required": ["status"], "additionalProperties": true }
+            }
+          }
+        }
+      },
+      "authority_boundary": {
+        "can_write_domain_truth": false,
+        "can_create_owner_receipt": false,
+        "can_create_typed_blocker": false,
+        "can_claim_domain_ready": false,
+        "can_claim_production_ready": false,
+        "owner": "OPL Base",
+        "surface": "opl_base_update_lifecycle"
+      }
+    },
     "update_repair": {
       "command_id": "update repair",
       "owner": "OPL Base",

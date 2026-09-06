@@ -5,8 +5,10 @@ import {
   os,
   path,
   runCli,
+  shellSingleQuote,
   test,
 } from '../../helpers.ts';
+import { codexProtocolFixture } from '../system-startup-maintenance-cases/codex-protocol-fixture.ts';
 
 test('update recovery operations expose controlled runtime maintenance execution boundaries', () => {
   const homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-managed-update-operations-'));
@@ -47,7 +49,7 @@ exit 2
       '  vendor_root="$prefix/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin"',
       '  mkdir -p "$package_root"',
       '  mkdir -p "$vendor_root/bin" "$vendor_root/codex-path"',
-      '  printf \'%s\\n\' \'#!/usr/bin/env bash\' \'echo "codex-cli 0.134.0"\' > "$vendor_root/bin/codex"',
+      `  printf '%s' ${shellSingleQuote(codexProtocolFixture())} > "$vendor_root/bin/codex"`,
       '  printf \'%s\\n\' \'#!/usr/bin/env bash\' \'echo "rg staged"\' > "$vendor_root/codex-path/rg"',
       '  chmod +x "$vendor_root/bin/codex" "$vendor_root/codex-path/rg"',
       '  echo "installed staged @openai/codex@latest"',

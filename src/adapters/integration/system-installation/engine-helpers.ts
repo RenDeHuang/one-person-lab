@@ -7,6 +7,8 @@ import { spawnSync } from 'node:child_process';
 import { isRecord } from '../../../kernel/contract-validation.ts';
 import { readJsonFileOrNull } from '../../../kernel/json-file.ts';
 import { resolveCodexBinary } from '../../execution/index.ts';
+import { CODEX_APP_SERVER_SMOKE, verifyCodexAppServer } from './codex-app-server-smoke.ts';
+import { isDeveloperRuntimePath } from './pending-runtime-integrity.ts';
 
 import {
   type OplEngineAction,
@@ -821,7 +823,7 @@ function materializePreseededCodexPlatformPackage(stageAttemptRoot: string, plat
 }
 
 function verifyCodexExecutable(binaryPath: string) {
-  const versionResult = runCommand(binaryPath, ['--version']);
+  const versionResult = runCommand(binaryPath, ['--version'], undefined, { timeoutMs: 8000, maxBuffer: 64 * 1024 });
   const version = versionResult.exitCode === 0
     ? normalizeOptionalString(normalizeOutput(versionResult.stdout, versionResult.stderr))
     : null;
@@ -835,7 +837,7 @@ function verifyCodexExecutable(binaryPath: string) {
   };
 }
 
-function applyCodexVendorToRuntime(
+async function applyCodexVendorToRuntime(
   vendor: InstalledCodexPayload,
   paths: RuntimeToolchainPaths,
   packageRoot: string,
@@ -851,16 +853,18 @@ function applyCodexVendorToRuntime(
   fs.rmSync(generationCodexPath, { force: true });
   copyExecutable(vendor.codex!, generationCodexPath);
   const verification = verifyCodexExecutable(generationCodexPath);
-  if (!verification.verified) {
+  const protocolVerification = verification.verified ? await verifyCodexAppServer(generationCodexPath) : null;
+  if (!verification.verified || !protocolVerification?.verified) {
     fs.rmSync(generationRoot, { recursive: true, force: true });
     return {
       applied: false,
       runtime_binary_path: paths.current_codex_path,
       codex_package_root: packageRoot,
-      reason: 'staged_codex_binary_failed_version_verification',
+      reason: verification.verified ? 'staged_codex_binary_failed_protocol_verification' : 'staged_codex_binary_failed_version_verification',
       source_kind: 'platform_vendor_binary',
       platform_package_root: vendor.platform_package_root,
       verification,
+      protocol_verification: protocolVerification,
     };
   }
 
@@ -879,6 +883,7 @@ function applyCodexVendorToRuntime(
     generation_root: generationRoot,
     version: verification.parsed_version,
     codex_sha256: crypto.createHash('sha256').update(fs.readFileSync(generationCodexPath)).digest('hex'),
+    protocol_verification: protocolVerification,
     staged_at: new Date().toISOString(),
     activation: 'next_app_start',
     rollback_root: paths.previous_root,
@@ -907,11 +912,17 @@ function applyCodexVendorToRuntime(
     copied_codex_source: vendor.codex,
     copied_rg_source: vendor.rg,
     verification,
+    protocol_verification: protocolVerification,
   };
 }
 
 export function activatePendingCodexRuntimeGeneration() {
   const paths = resolveOplRuntimeToolchainPaths();
+  const result = activatePendingCodexRuntimeGenerationAtPaths(paths);
+  return { ...result, runtime_binary_path: fs.existsSync(paths.current_codex_path) ? paths.current_codex_path : null };
+}
+
+function activatePendingCodexRuntimeGenerationAtPaths(paths: RuntimeToolchainPaths) {
   if (!fs.existsSync(paths.pending_metadata_path)) {
     return {
       surface_kind: 'opl_runtime_generation_activation.v1',
@@ -920,7 +931,7 @@ export function activatePendingCodexRuntimeGeneration() {
       previous_root: paths.previous_root,
     };
   }
-  let pending: { generation_root?: unknown; version?: unknown; codex_sha256?: unknown; staging_process_instance_id?: unknown };
+  let pending: { generation_root?: unknown; version?: unknown; codex_sha256?: unknown; staging_process_instance_id?: unknown; protocol_verification?: unknown };
   try {
     pending = JSON.parse(fs.readFileSync(paths.pending_metadata_path, 'utf8')) as typeof pending;
   } catch (error) {
@@ -935,7 +946,12 @@ export function activatePendingCodexRuntimeGeneration() {
   }
   const generationRoot = typeof pending.generation_root === 'string' ? path.resolve(pending.generation_root) : null;
   const allowedRoot = path.resolve(paths.generations_root);
-  if (!generationRoot || !generationRoot.startsWith(`${allowedRoot}${path.sep}`)) {
+  if (!generationRoot || !generationRoot.startsWith(`${allowedRoot}${path.sep}`)
+    || isDeveloperRuntimePath(paths.current_root)
+    || (fs.existsSync(paths.current_bin_dir) && (fs.lstatSync(paths.current_bin_dir).isSymbolicLink()
+      || isDeveloperRuntimePath(fs.realpathSync(paths.current_bin_dir))))
+    || !fs.existsSync(generationRoot) || fs.lstatSync(generationRoot).isSymbolicLink()
+    || !fs.realpathSync(generationRoot).startsWith(`${fs.realpathSync(allowedRoot)}${path.sep}`)) {
     return {
       surface_kind: 'opl_runtime_generation_activation.v1',
       status: 'manual_required',
@@ -955,6 +971,13 @@ export function activatePendingCodexRuntimeGeneration() {
     };
   }
   const stagedCodex = path.join(generationRoot, 'bin', 'codex');
+  if (!isRecord(pending.protocol_verification) || pending.protocol_verification.verified !== true
+    || pending.protocol_verification.protocol !== CODEX_APP_SERVER_SMOKE) {
+    return {
+      surface_kind: 'opl_runtime_generation_activation.v1', status: 'manual_required',
+      reason: 'pending_generation_protocol_unverified', current_root: paths.current_root, previous_root: paths.previous_root,
+    };
+  }
   const verification = fs.existsSync(stagedCodex) ? verifyCodexExecutable(stagedCodex) : null;
   const digest = verification?.verified
     ? crypto.createHash('sha256').update(fs.readFileSync(stagedCodex)).digest('hex')
@@ -1075,7 +1098,7 @@ export function rollbackCodexRuntimeGeneration(
   };
 }
 
-function applyStagedCodexRuntimePayload(stageAttemptRoot: string, paths: RuntimeToolchainPaths, cwd?: string) {
+async function applyStagedCodexRuntimePayload(stageAttemptRoot: string, paths: RuntimeToolchainPaths, cwd?: string) {
   const packageRoot = findInstalledCodexPackageRoot(stageAttemptRoot);
   if (!packageRoot) {
     return {
@@ -1126,7 +1149,7 @@ function applyStagedCodexRuntimePayload(stageAttemptRoot: string, paths: Runtime
           platform_spec: resolveInstalledCodexPlatformSpec(packageRoot),
         }
       : null,
-    ...applyCodexVendorToRuntime(vendor, paths, packageRoot),
+    ...await applyCodexVendorToRuntime(vendor, paths, packageRoot),
   };
 }
 
@@ -1140,6 +1163,8 @@ function readLatestPendingCodexGeneration(paths: RuntimeToolchainPaths) {
       generation_root?: unknown;
       version?: unknown;
       staging_process_instance_id?: unknown;
+      protocol_verification?: unknown;
+      codex_sha256?: unknown;
     };
     const pendingVersion = typeof payload.version === 'string'
       ? parseCliVersion(payload.version)?.version ?? null
@@ -1154,6 +1179,9 @@ function readLatestPendingCodexGeneration(paths: RuntimeToolchainPaths) {
       || !generationRoot
       || !generationRoot.startsWith(`${allowedRoot}${path.sep}`)
       || !fs.existsSync(path.join(generationRoot, 'bin', 'codex'))) return null;
+    if (!isRecord(payload.protocol_verification) || payload.protocol_verification.verified !== true
+      || payload.protocol_verification.protocol !== CODEX_APP_SERVER_SMOKE
+      || crypto.createHash('sha256').update(fs.readFileSync(path.join(generationRoot, 'bin', 'codex'))).digest('hex') !== payload.codex_sha256) return null;
     return {
       version: pendingVersion,
       generation_root: generationRoot,
@@ -1166,7 +1194,7 @@ function readLatestPendingCodexGeneration(paths: RuntimeToolchainPaths) {
   }
 }
 
-function runBuiltinCodexRuntimeInstallOrUpdate(cwd?: string) {
+async function runBuiltinCodexRuntimeInstallOrUpdate(cwd?: string) {
   const paths = resolveOplRuntimeToolchainPaths();
   const preflightStageCleanup = pruneRuntimeStageAttempts(paths.staging_root);
   const pending = readLatestPendingCodexGeneration(paths);
@@ -1237,7 +1265,7 @@ function runBuiltinCodexRuntimeInstallOrUpdate(cwd?: string) {
       };
     }
 
-    const runtimeApply = applyStagedCodexRuntimePayload(stageAttemptRoot, paths, cwd);
+    const runtimeApply = await applyStagedCodexRuntimePayload(stageAttemptRoot, paths, cwd);
     if (!runtimeApply.applied) {
       return {
         exitCode: 1,
