@@ -5,6 +5,8 @@ import path from 'node:path';
 import { canonicalJsonText } from '../../kernel/canonical-json.ts';
 import { FrameworkContractError, isRecord } from '../../kernel/contract-validation.ts';
 import { requireAgentPackageReadinessPort } from '../../kernel/agent-package-readiness-port.ts';
+import { gitMarketplaceRuntimeRoot } from '../../kernel/git-marketplace-runtime-root.ts';
+import { sameMarketplaceSource } from '../../kernel/marketplace-source-identity.ts';
 import {
   resolveStandardAgent,
   STANDARD_AGENT_SERIES_MEMBERSHIP,
@@ -52,9 +54,26 @@ function localCarrierRuntimeCheckout(packageStatus: any) {
     || installedReady?.callability !== 'callable'
     || !marketplaceRoot
     || !pluginRoot
-    || !path.isAbsolute(marketplaceRoot)
     || !path.isAbsolute(pluginRoot)
   ) return null;
+
+  const observed = observedSources[0];
+  if (!path.isAbsolute(marketplaceRoot)) {
+    const observedSource = optionalString(observed.marketplace_source);
+    if (
+      !observedSource
+      || !sameMarketplaceSource(observedSource, marketplaceRoot)
+      || optionalString(observed.plugin_source_path) !== pluginRoot
+      || optionalString(installedCarrier.source_ref) !== pluginRoot
+    ) return null;
+    try {
+      return gitMarketplaceRuntimeRoot(
+        fs.realpathSync.native(pluginRoot), observedSource, 'contracts/domain_descriptor.json',
+      );
+    } catch {
+      return null;
+    }
+  }
 
   let normalizedMarketplace: string;
   let normalizedPlugin: string;
@@ -64,7 +83,6 @@ function localCarrierRuntimeCheckout(packageStatus: any) {
   } catch {
     return null;
   }
-  const observed = observedSources[0];
   if (
     (normalizedPlugin !== normalizedMarketplace
       && !normalizedPlugin.startsWith(`${normalizedMarketplace}${path.sep}`))

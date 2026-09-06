@@ -161,6 +161,34 @@ test('verified local carrier uses its marketplace root without state-local sourc
   }
 });
 
+test('Git marketplace launch resolves the same verified runtime root as hosted actions', () => {
+  const marketplaceRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'opl-git-marketplace-')));
+  const pluginRoot = path.join(marketplaceRoot, 'plugins', 'med-autoscience');
+  fs.mkdirSync(path.join(marketplaceRoot, 'contracts'), { recursive: true });
+  fs.mkdirSync(pluginRoot, { recursive: true });
+  fs.writeFileSync(path.join(marketplaceRoot, 'contracts/domain_descriptor.json'), '{}\n');
+  const marker = path.join(marketplaceRoot, '.codex-marketplace-install.json');
+  const status = {
+    installed_carrier_readback: { kind: 'local', lifecycle_authority: 'carrier_owned', source_ref: pluginRoot },
+    installed_readiness: { installed: true, physical_status: 'available', callability: 'callable' },
+    configured_carrier: {
+      status: 'installed', plugin_source_path: pluginRoot,
+      carrier: {
+        marketplace_source: 'gaofeng21cn/med-autoscience', precedence: 'exact_single_source',
+        observed_sources: [{ marketplace_source: 'https://github.com/gaofeng21cn/med-autoscience.git', plugin_source_path: pluginRoot }],
+      },
+    },
+  };
+  try {
+    fs.writeFileSync(marker, JSON.stringify({ source: 'https://github.com/gaofeng21cn/med-autoscience.git' }));
+    assert.equal(packageRuntimeSourceCheckoutPath(status), marketplaceRoot);
+    fs.writeFileSync(marker, JSON.stringify({ source: 'https://github.com/other/foreign.git' }));
+    assert.equal(packageRuntimeSourceCheckoutPath(status), pluginRoot);
+  } finally {
+    fs.rmSync(marketplaceRoot, { recursive: true, force: true });
+  }
+});
+
 test('native carrier with missing source fails closed instead of falling back', () => {
   assert.equal(packageRuntimeSourceCheckoutPath({
     installed_carrier_readback: {
