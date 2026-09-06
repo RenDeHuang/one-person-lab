@@ -1068,6 +1068,36 @@ test('native carrier contract checkout uses the carrier source without runtime s
   }
 });
 
+test('installed Git marketplace discovery shares the hosted runtime root and rejects a foreign marker', () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'opl-marketplace-discovery-')));
+  const pluginRoot = path.join(root, 'plugins', 'med-autoscience');
+  fs.mkdirSync(pluginRoot, { recursive: true });
+  writeStandardAgentDescriptor(root, standardAgentDescriptor('medautoscience'));
+  const marker = path.join(root, '.codex-marketplace-install.json');
+  const statusReader = (() => ({
+    opl_agent_package_status: {
+      installed_package_count: 1,
+      launch_allowed: true,
+      installed_carrier_readback: {
+        lifecycle_authority: 'carrier_owned',
+        source_ref: pluginRoot,
+      },
+      installed_readiness: { installed: true, physical_status: 'available', callability: 'callable' },
+      configured_carrier: { carrier: { marketplace_source: 'gaofeng21cn/med-autoscience' } },
+    },
+  })) as unknown as PackageStatusReaderFixture;
+  try {
+    fs.writeFileSync(marker, JSON.stringify({ source: 'https://github.com/gaofeng21cn/med-autoscience.git' }));
+    assert.equal(resolveStandardAgentContractCheckout('mas', statusReader, () => null)?.checkout_path, root);
+    assert.equal(readStandardAgentDescriptorForDomain('mas', statusReader, () => null)?.domain_id, 'medautoscience');
+    fs.writeFileSync(marker, JSON.stringify({ source: 'https://github.com/other/foreign.git' }));
+    assert.equal(resolveStandardAgentContractCheckout('mas', statusReader, () => null)?.checkout_path, pluginRoot);
+    assert.equal(readStandardAgentDescriptorForDomain('mas', statusReader, () => null), null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('typed contract checkout resolution fails closed without native carrier authority', () => {
   const statusReader = (() => ({
     opl_agent_package_status: {

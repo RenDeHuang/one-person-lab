@@ -6,6 +6,7 @@ import { requireAgentPackageReadinessPort } from '../../kernel/agent-package-rea
 import { FrameworkContractError, isRecord } from '../../kernel/contract-validation.ts';
 import { parseJsonText } from '../../kernel/json-file.ts';
 import { sameMarketplaceSource } from '../../kernel/marketplace-source-identity.ts';
+import { gitMarketplaceRuntimeRoot, runtimeRootContainsDescriptor } from '../../kernel/git-marketplace-runtime-root.ts';
 import {
   resolveStandardAgent,
   STANDARD_AGENT_SERIES_MEMBERSHIP,
@@ -77,44 +78,6 @@ function pathsMatch(left: string, right: string) {
 
 function pathWithin(root: string, candidate: string) {
   return candidate === root || candidate.startsWith(`${root}${path.sep}`);
-}
-
-function runtimeRootContainsDescriptor(root: string, descriptorRef: string) {
-  const descriptorPath = path.resolve(root, descriptorRef);
-  if (!pathWithin(root, descriptorPath)) return false;
-  try {
-    const stat = fs.lstatSync(descriptorPath);
-    return stat.isFile()
-      && !stat.isSymbolicLink()
-      && pathWithin(root, fs.realpathSync.native(descriptorPath));
-  } catch {
-    return false;
-  }
-}
-
-function gitMarketplaceRuntimeRoot(
-  pluginSourcePath: string,
-  marketplaceSource: string,
-  descriptorRef: string,
-) {
-  let candidate = path.dirname(pluginSourcePath);
-  while (candidate !== path.dirname(candidate)) {
-    const markerPath = path.join(candidate, '.codex-marketplace-install.json');
-    try {
-      const stat = fs.lstatSync(markerPath);
-      const marker = parseJsonText(fs.readFileSync(markerPath, 'utf8'));
-      if (!stat.isFile() || stat.isSymbolicLink() || !isRecord(marker)) return null;
-      const source = typeof marker.source === 'string' ? marker.source.trim() : '';
-      return source
-        && sameMarketplaceSource(source, marketplaceSource)
-        && runtimeRootContainsDescriptor(candidate, descriptorRef)
-        ? candidate
-        : null;
-    } catch {
-      candidate = path.dirname(candidate);
-    }
-  }
-  return null;
 }
 
 function marketplaceMatches(

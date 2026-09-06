@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { gitMarketplaceRuntimeRoot } from '../../kernel/git-marketplace-runtime-root.ts';
 
 import {
   readStandardAgentDescriptorInterface,
@@ -248,6 +249,14 @@ function canonicalCheckoutPath(value: string) {
 function installedCarrierSourceFromStatus(
   status: ReturnType<PackageStatusReader>['opl_agent_package_status'],
 ) {
+  const runtimeCheckout = (sourceRef: string | null) => {
+    const pluginRoot = sourceRef ? canonicalCheckoutPath(sourceRef) : null;
+    if (!pluginRoot) return null;
+    const marketplaceSource = status.configured_carrier?.carrier?.marketplace_source;
+    return (typeof marketplaceSource === 'string'
+      ? gitMarketplaceRuntimeRoot(pluginRoot, marketplaceSource, 'contracts/domain_descriptor.json')
+      : null) ?? pluginRoot;
+  };
   const carrier = status.installed_carrier_readback;
   if (carrier) {
     const readiness = status.installed_readiness;
@@ -259,7 +268,7 @@ function installedCarrierSourceFromStatus(
       : null;
     return {
       selected: true as const,
-      checkout_path: sourceRef ? canonicalCheckoutPath(sourceRef) : null,
+      checkout_path: runtimeCheckout(sourceRef),
     };
   }
   const configured = status.configured_carrier;
@@ -271,7 +280,7 @@ function installedCarrierSourceFromStatus(
     : null;
   return {
     selected: true as const,
-    checkout_path: sourceRef ? canonicalCheckoutPath(sourceRef) : null,
+    checkout_path: runtimeCheckout(sourceRef),
   };
 }
 
