@@ -248,23 +248,22 @@ function requirePersistedAttemptStageRunIdentity(input: {
   return attempt;
 }
 
-function exactRefsFromCloseoutMetadata(value: unknown) {
+export function exactRefsFromCloseoutMetadata(value: unknown) {
   const entries = Array.isArray(value) ? value.filter(isRecord) : [];
   return entries.flatMap((entry) => {
     const kind = readString(entry.kind);
     const ref = readString(entry.ref) ?? readString(entry.uri);
-    const sha256 = readString(entry.sha256);
+    const digest = readString(entry.sha256)?.match(/^(?:sha256:)?([a-f0-9]{64})$/i);
     const sizeBytes = readNumber(entry.size_bytes);
     if (
       !kind
       || !ref
-      || !sha256
-      || !/^sha256:[a-f0-9]{64}$/.test(sha256)
+      || !digest
       || sizeBytes === null
       || !Number.isSafeInteger(sizeBytes)
       || sizeBytes < 0
     ) return [];
-    return [{ kind, ref, sha256, size_bytes: sizeBytes }];
+    return [{ kind, ref, sha256: `sha256:${digest[1]!.toLowerCase()}`, size_bytes: sizeBytes }];
   });
 }
 

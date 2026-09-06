@@ -7,10 +7,17 @@ import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { runnerPromptFor } from '../../src/adapters/execution/family-runtime-codex-stage-runner-parts/input-prompt.ts';
 import { materializeReviewerInputSnapshot, reviewerSnapshotStageRunInputAuthority } from '../../src/adapters/execution/family-runtime-reviewer-input-snapshot.ts';
+import { exactRefsFromCloseoutMetadata } from '../../src/adapters/execution/family-runtime-temporal-activities.ts';
 
 const sha = (bytes: string) => `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`;
 const bindingHash = sha('execution');
 const attemptRef = 'opl://stage_attempts/producer-snapshot';
+test('snapshot authority accepts the exact digest representation persisted by artifact identity transport', () => {
+  const entry = { kind: 'design_scope', ref: 'file:///workspace/scope.json', sha256: sha('scope'), size_bytes: 5 };
+  assert.deepEqual(exactRefsFromCloseoutMetadata([entry]), [entry]);
+  assert.deepEqual(exactRefsFromCloseoutMetadata([{ ...entry, sha256: entry.sha256.slice(7) }]), [entry]);
+  assert.deepEqual(exactRefsFromCloseoutMetadata([{ ...entry, sha256: 'invalid' }]), []);
+});
 const promptFor = (role: string, formal: boolean) => runnerPromptFor({
   attempt: {
     stage_attempt_id: 'producer-snapshot', stage_id: 'design', attempt_role: role,
