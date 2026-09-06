@@ -2,11 +2,13 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import agentBlueprintSchema from '../../../contracts/opl-framework/foundry-agent-blueprint.schema.json' with { type: 'json' };
+import evolutionProposalSchema from '../../../contracts/opl-framework/foundry-evolution-proposal.schema.json' with { type: 'json' };
 
 import { canonicalJsonBytes, canonicalJsonText } from '../../kernel/canonical-json.ts';
 import { FrameworkContractError, isRecord } from '../../kernel/contract-validation.ts';
 import { parseJsonText, writeJsonPayloadFile } from '../../kernel/json-file.ts';
-import { FoundryTransientActivityError } from '../../authority/evolution/index.ts';
+import { FoundryTransientActivityError, foundryContentDigest } from '../../authority/evolution/index.ts';
 import type {
   FoundryProviderOperationInvoker,
   FoundryProviderManifest,
@@ -197,6 +199,7 @@ function defaultTransportRoot(storageRoot: string) {
 function writeActivityInput(input: {
   storageRoot: string;
   operation: 'design' | 'diagnose';
+  provider: FoundryProviderManifest;
   activity: FoundryActivityIdentity;
   payload: JsonRecord;
 }) {
@@ -206,6 +209,27 @@ function writeActivityInput(input: {
     operation: input.operation,
     activity: input.activity,
     payload: input.payload,
+    output_contract: {
+      provider_manifest_digest: foundryContentDigest(input.provider),
+      ...input.provider.operations[input.operation],
+      schemas: (input.operation === 'design'
+        ? [agentBlueprintSchema]
+        : [evolutionProposalSchema, agentBlueprintSchema]).map((schema) => ({
+        schema_id: schema.$id,
+        content_ref: `opl-content://sha256/${sha256(canonicalJsonBytes(schema))}`,
+        sha256: `sha256:${sha256(canonicalJsonBytes(schema))}`,
+        size_bytes: canonicalJsonBytes(schema).length,
+        content: canonicalJsonText(schema),
+      })),
+      transport_requirements: [
+        'Apply this output contract throughout the operation, including intermediate blueprint authoring and formal Review. The terminal_stage_ref and output_schema_ref are declared by the bound provider manifest.',
+        'The terminal producer or repairer must expose exactly one raw JSON artifact conforming to output_schema_ref. Its root is the protocol object itself, not a Stage report wrapping or referencing the object. Respect the exact schema keys and embedded EvalSpec schema; keep supplementary analysis in separate artifacts.',
+        'Declare that raw protocol artifact in closeout_refs, closeout_ref_metadata, and route_impact.stage_quality_cycle.artifact_refs with its exact artifact_hashes entry. A new Stage report alone does not satisfy the terminal output contract.',
+        'Also expose the exact bytes of every content_refs entry of the blueprint (next_blueprint for EvolutionProposal) as terminal Stage artifacts with matching SHA-256 identities. This includes prompts, skills, knowledge, helpers, models, tools, and schemas. Nested byte descriptions or a list of content refs are not transported bytes.',
+        'Include the raw protocol object and all referenced content bytes in the explicit immutable reviewer snapshot members. Formal Review must check schema conformance and complete content transport before accepting the terminal output. The review report is not a replacement for the reviewed protocol artifact.',
+        'These are semantic protocol and content artifacts, not materialized candidate/package/version bytes. OPL retains candidate compilation, independent evaluation, qualification, version and receipt authority.',
+      ],
+    },
   });
   const digest = sha256(bytes);
   const directory = path.join(input.storageRoot, 'provider-inputs');
@@ -334,6 +358,7 @@ export class StageRunFoundryProviderInvoker implements FoundryProviderOperationI
     const activityInput = writeActivityInput({
       storageRoot: this.#storageRoot,
       operation: input.operation,
+      provider: input.provider,
       activity: input.activity,
       payload: input.payload,
     });

@@ -10,6 +10,7 @@ import { canonicalJsonBytes } from '../../src/kernel/canonical-json.ts';
 import {
   FOUNDRY_PROTOCOL_VERSION,
   foundryContentDigest,
+  normalizeFoundryProviderManifest,
   readFoundryProviderManifest,
   type AgentBlueprint,
   type FoundryProviderManifest,
@@ -76,6 +77,91 @@ const provider: FoundryProviderManifest = {
     opl_can_write_target_domain_truth: false,
   },
 };
+
+for (const operation of ['design', 'diagnose'] as const) {
+  test(`StageRun ${operation} binds declared output schemas and transport requirements before launch`, async (t) => {
+    const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-foundry-output-contract-'));
+    t.after(() => fs.rmSync(storageRoot, { recursive: true, force: true }));
+    const declaredProvider = structuredClone(provider);
+    declaredProvider.provider_id = 'another-provider';
+    declaredProvider.agent_id = 'another-provider';
+    declaredProvider.package_id = 'another-provider';
+    declaredProvider.operations[operation].terminal_stage_ref = 'custom-terminal';
+    declaredProvider.operations[operation].required_stage_refs.push('custom-terminal');
+    let captured: Record<string, any> | undefined;
+    const launchBoundary = new Error('stop after capturing immutable launch inputs');
+    const invoker = new StageRunFoundryProviderInvoker({
+      storage_root: storageRoot,
+      gateway: {
+        async launch(input) {
+          const bytes = fs.readFileSync(new URL(input.input_artifact_refs[0]!));
+          assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), input.input_artifact_hashes[0]);
+          captured = JSON.parse(bytes.toString('utf8'));
+          throw launchBoundary;
+        },
+        async query() { throw new Error('not used'); },
+      },
+    });
+    await assert.rejects(invoker.invoke({
+      operation,
+      provider: normalizeFoundryProviderManifest(declaredProvider),
+      checkout_root: '/managed/another-provider',
+      activity: { ...activity, phase: operation },
+      payload: {} as never,
+    }), (error) => error === launchBoundary);
+    assert.ok(captured);
+    const contract = captured.output_contract;
+    assert.ok(contract, 'immutable provider input must include its output contract');
+    assert.equal(contract.terminal_stage_ref, 'custom-terminal');
+    assert.equal(contract.output_schema_ref, declaredProvider.operations[operation].output_schema_ref);
+    assert.equal(contract.provider_manifest_digest, foundryContentDigest(declaredProvider));
+    assert.equal(contract.schemas.length, operation === 'design' ? 1 : 2);
+    for (const entry of contract.schemas) {
+      assert.equal(entry.size_bytes, Buffer.byteLength(entry.content));
+      assert.equal(entry.sha256, `sha256:${crypto.createHash('sha256').update(entry.content).digest('hex')}`);
+      assert.equal(entry.content_ref, `opl-content://sha256/${entry.sha256.slice(7)}`);
+      assert.equal(JSON.parse(entry.content).$id, entry.schema_id);
+    }
+    const blueprint = JSON.parse(contract.schemas.at(-1).content);
+    assert.equal(blueprint.properties.surface_kind.const, 'opl_foundry_agent_blueprint');
+    assert.equal(blueprint.additionalProperties, false);
+    assert.ok(blueprint.$defs.eval_spec);
+    assert.match(contract.transport_requirements.join('\n'), /exactly one raw JSON artifact/);
+    assert.match(contract.transport_requirements.join('\n'), /immutable reviewer snapshot/);
+  });
+}
+
+test('StageRun provider rejects a report wrapping the raw terminal protocol object', async (t) => {
+  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-foundry-output-wrapper-'));
+  t.after(() => fs.rmSync(storageRoot, { recursive: true, force: true }));
+  const output = canonicalJsonBytes({
+    surface_kind: 'stage_report',
+    blueprint: { surface_kind: 'opl_foundry_agent_blueprint' },
+  });
+  const invoker = new StageRunFoundryProviderInvoker({
+    storage_root: storageRoot,
+    gateway: {
+      async launch() { return { workflow_id: 'workflow:mission-intake' }; },
+      async query(workflowId) {
+        return workflowId === 'workflow:mission-intake'
+          ? state({ stage: 'mission-intake', next: 'workflow:evaluation-design' })
+          : state({
+              stage: 'evaluation-design',
+              refs: ['memory://wrapped-output'],
+              hashes: [crypto.createHash('sha256').update(output).digest('hex')],
+            });
+      },
+    },
+    artifact_reader: { readExact: () => output },
+  });
+  await assert.rejects(invoker.invoke({
+    operation: 'design',
+    provider,
+    checkout_root: '/managed/oma',
+    payload: { request: { marker: 'request' } as never },
+    activity,
+  }), /exactly one schema-targeted raw output artifact/);
+});
 
 const activity: FoundryActivityIdentity = {
   run_id: 'run:provider-stage-test',
