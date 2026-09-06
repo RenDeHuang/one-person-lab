@@ -52,6 +52,13 @@ test('packages update reports lock contention without running a parallel writer'
     assert.equal(failure.payload.error.details.surface_id, 'opl_managed_updater_kernel');
     assert.equal(failure.payload.error.details.lock_status, 'held');
     assert.equal(failure.payload.error.details.repair_action, 'retry_after_current_update_finishes_or_remove_stale_lock_after_timeout');
+    const startupFailure = runCliFailure(['system', 'startup-maintenance'], {
+      HOME: homeRoot,
+      CODEX_HOME: path.join(homeRoot, 'codex-home'),
+      OPL_STATE_DIR: stateRoot,
+      OPL_MODULES_ROOT: path.join(homeRoot, 'modules'),
+    });
+    assert.equal(startupFailure.payload.error.code, 'managed_update_lock_contention');
   } finally {
     fs.rmSync(homeRoot, { recursive: true, force: true });
   }

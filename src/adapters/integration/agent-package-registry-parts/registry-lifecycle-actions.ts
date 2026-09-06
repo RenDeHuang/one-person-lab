@@ -19,6 +19,7 @@ import {
 import { normalizePackageManifest } from './manifest-normalizers.ts';
 import {
   packageSnapshot,
+  packageBackgroundUpdatePolicy,
   requireDescriptor,
   requirePackageMutationDescriptor,
 } from './registry-status-projection.ts';
@@ -134,6 +135,17 @@ function nativeLifecycleResult(
     action,
     dryRun: input.dryRun,
   });
+  if (!input.dryRun && ['install', 'update', 'repair'].includes(action)
+    && (configuredCarrier.status !== 'installed' || configuredCarrier.executor.status !== 'callable')) {
+    throw new FrameworkContractError('contract_shape_invalid', 'Package update did not produce a callable native installation.', {
+      package_id: descriptor.manifest.package_id,
+      action,
+      failure_code: 'agent_package_native_post_update_readback_failed',
+      carrier_status: configuredCarrier.status,
+      executor_status: configuredCarrier.executor.status,
+      reason: configuredCarrier.reason,
+    });
+  }
   const status = input.dryRun
     ? 'validated_no_write'
     : action === 'remove'
@@ -313,6 +325,7 @@ export async function runOplAgentPackageUpdate(input: AgentPackageInstallInput) 
 type OplAgentPackageBulkUpdateInput = {
   action?: 'update' | 'repair';
   dryRun?: boolean;
+  background?: boolean;
 };
 
 export async function runOplAgentPackageBulkUpdate(
@@ -325,8 +338,15 @@ export async function runOplAgentPackageBulkUpdate(
   const targets: Record<string, unknown>[] = [];
   for (const descriptor of descriptors) {
     const packageId = descriptor.manifest.package_id;
+    const policy = packageBackgroundUpdatePolicy(descriptor);
+    if (input.background && !policy.eligible) {
+      targets.push({ target_type: 'package', target_id: packageId, status: 'skipped', reason: policy.reason, action });
+      continue;
+    }
     try {
-      const result = action === 'repair'
+      const result = input.background
+        ? nativeLifecycleResult(action, { packageId, dryRun: input.dryRun }, descriptor)
+        : action === 'repair'
         ? await runOplAgentPackageRepair({ packageId, dryRun: input.dryRun })
         : await runOplAgentPackageUpdate({ packageId, dryRun: input.dryRun });
       targets.push({

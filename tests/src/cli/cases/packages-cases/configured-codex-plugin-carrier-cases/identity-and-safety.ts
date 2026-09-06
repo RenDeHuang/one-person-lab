@@ -1005,7 +1005,7 @@ test('an absent default Codex carrier does not masquerade as a failed native rea
         error,
       }),
     });
-    assert.equal(discovered.size, 0);
+    assert.equal([...discovered.values()].filter((entry) => entry.carrier_readback.kind !== 'project_local_owner_projection').length, 0);
   } finally {
     if (previousBinary === undefined) delete process.env.OPL_CODEX_PLUGIN_BIN;
     else process.env.OPL_CODEX_PLUGIN_BIN = previousBinary;

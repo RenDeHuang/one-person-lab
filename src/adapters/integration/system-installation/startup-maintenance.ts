@@ -5,6 +5,7 @@ import {
   type TemporalStartupMaintenanceRuntime,
 } from '../../execution/index.ts';
 import { recordManagedInstallUpdateReceipts } from '../managed-install-update-ledger.ts';
+import { acquireManagedUpdateLock } from '../managed-update-lock.ts';
 import {
   inspectManagedBrowserAutomation,
   reconcileManagedBrowserAutomation,
@@ -474,8 +475,17 @@ export function runManagedBrowserAutomationStartupMaintenance(): StartupMaintena
 async function maybeRunEngineStartupMaintenance(
   contracts: FrameworkContracts,
   environment: OplSystemEnvironment,
+  stageOnly = false,
 ): Promise<StartupMaintenanceEngineTarget> {
   const codex = environment.core_engines.codex;
+  if (stageOnly && (!codex.installed
+    || codex.binary_path !== codex.runtime_substrate_updater.current_binary_path
+    || process.env.OPL_CODEX_UPDATE_COMMAND?.trim())) {
+    return buildEngineTarget(environment, {
+      status: 'skipped', reason: 'background_requires_existing_managed_codex',
+      action: null, result: null, error: null,
+    });
+  }
   if (!codex.installed) {
     try {
       const result = await runOplEngineAction(contracts, 'install', 'codex');
@@ -543,25 +553,43 @@ async function maybeRunEngineStartupMaintenance(
   }
 }
 
+type StartupMaintenanceOptions = {
+  scope?: StartupMaintenanceScope;
+  temporalRuntime?: TemporalStartupMaintenanceRuntime;
+  stageOnly?: boolean;
+  updateLockHeld?: boolean;
+};
+
 export async function runOplStartupMaintenance(
   contracts: FrameworkContracts,
-  options: {
-    scope?: StartupMaintenanceScope;
-    temporalRuntime?: TemporalStartupMaintenanceRuntime;
-  } = {},
+  options: StartupMaintenanceOptions = {},
 ) {
-  const scope = options.scope ?? 'all';
-  const pendingRuntimeActivation = activatePendingCodexRuntimeGeneration();
+  const lock = options.updateLockHeld ? null : acquireManagedUpdateLock({ operation: 'apply', componentId: 'opl_base' });
+  try {
+    return await runStartupMaintenance(contracts, options);
+  } finally {
+    lock?.release();
+  }
+}
+
+async function runStartupMaintenance(
+  contracts: FrameworkContracts,
+  options: StartupMaintenanceOptions,
+) {
+  const stageOnly = options.stageOnly === true;
+  const scope = stageOnly ? 'runtime_substrate' : options.scope ?? 'all';
+  const pendingRuntimeActivation = stageOnly ? { status: 'deferred_background_maintenance' } : activatePendingCodexRuntimeGeneration();
   const frameworkTargetRoot = resolveFrameworkUpdateTargetRoot(resolveProjectRoot());
-  const pendingFrameworkActivation = activatePendingOplFrameworkRuntime(frameworkTargetRoot);
+  const pendingFrameworkActivation = stageOnly ? { status: 'deferred_background_maintenance' } : activatePendingOplFrameworkRuntime(frameworkTargetRoot);
   const initialEnvironment = (await buildOplEnvironment(contracts)).system_environment;
   const frameworkTargets: StartupMaintenanceFrameworkTarget[] = [
     runOplFrameworkSelfUpdate({
       targetRoot: frameworkTargetRoot,
       allowChannelArtifact: scope === 'runtime_substrate',
+      stageOnly,
     }),
   ];
-  const engineTargets = [await maybeRunEngineStartupMaintenance(contracts, initialEnvironment)];
+  const engineTargets = [await maybeRunEngineStartupMaintenance(contracts, initialEnvironment, stageOnly)];
   const initialModules = scope === 'runtime_substrate'
     ? []
     : buildOplModules().modules.modules.filter((module) => module.default_install);
@@ -571,7 +599,7 @@ export async function runOplStartupMaintenance(
   const capabilityTargets: StartupMaintenanceCapabilityTarget[] = initialModules
     .filter((module) => module.scope === 'capability_package')
     .map((module) => runModuleStartupMaintenance(module));
-  const managedCompanionTargets = process.env.OPL_APP_HOST_KIND?.trim() === 'desktop'
+  const managedCompanionTargets = !stageOnly && process.env.OPL_APP_HOST_KIND?.trim() === 'desktop'
     ? [runManagedBrowserAutomationStartupMaintenance(), runManagedComputerUseStartupMaintenance()]
     : [];
   const frameworkSummary = summarizeFrameworkTargets(frameworkTargets);
@@ -587,8 +615,8 @@ export async function runOplStartupMaintenance(
     .filter((target) => readSkillSyncStatus(target) === 'completed')
     .map((target) => readSkillSyncDomain(target))
     .filter((domainId): domainId is string => Boolean(domainId));
-  const seedApply = await applyOplSeedManifest();
-  const temporalRuntimeReconcile = await reconcileTemporalRuntimeStartupMaintenance(options.temporalRuntime);
+  const seedApply = stageOnly ? null : await applyOplSeedManifest();
+  const temporalRuntimeReconcile = stageOnly ? null : await reconcileTemporalRuntimeStartupMaintenance(options.temporalRuntime);
   const refreshedEnvironment = (await buildOplEnvironment(contracts)).system_environment;
   const dockerWebuiStartup = buildDockerWebuiStartupReadback();
 
@@ -600,7 +628,7 @@ export async function runOplStartupMaintenance(
         || engineSummary.manual_required_targets_count > 0
         || frameworkSummary.manual_required_targets_count > 0
         || capabilitySummary.manual_required_targets_count > 0
-        || temporalRuntimeReconcile.status === 'blocked'
+        || temporalRuntimeReconcile?.status === 'blocked'
         ? 'manual_required'
         : 'completed',
       update_channel: readOplUpdateChannel().channel,
@@ -611,6 +639,7 @@ export async function runOplStartupMaintenance(
           ? 'runtime_substrate_adapter_startup'
           : 'clean_managed_environment_startup',
         scope,
+        stage_only: stageOnly,
         pending_runtime_activation: pendingRuntimeActivation,
         pending_framework_activation: pendingFrameworkActivation,
         process_instance_id: process.env.OPL_APP_PROCESS_INSTANCE_ID?.trim() ?? null,
@@ -632,7 +661,7 @@ export async function runOplStartupMaintenance(
         capability_targets: capabilityTargets,
         managed_companion_targets: managedCompanionTargets,
         module_targets: moduleTargets,
-        seed_boundary: seedApply.seed_apply,
+        seed_boundary: seedApply?.seed_apply ?? null,
         docker_webui_startup: {
           startup_state: dockerWebuiStartup.startup_state,
           diagnostic_summary: dockerWebuiStartup.diagnostic_summary,
@@ -678,7 +707,7 @@ export async function runOplStartupMaintenance(
           can_mutate_domain_artifact_body: false,
           can_install_domain_daemon: false,
           can_install_opl_provider_supervisor:
-            temporalRuntimeReconcile.authority_boundary.can_install_opl_provider_supervisor,
+            temporalRuntimeReconcile?.authority_boundary.can_install_opl_provider_supervisor ?? false,
         },
         refreshed_system_environment: refreshedEnvironment,
         notes: [

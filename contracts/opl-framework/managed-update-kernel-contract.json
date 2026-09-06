@@ -3,6 +3,15 @@
   "owner": "one-person-lab",
   "purpose": "managed_update_kernel_contract",
   "state": "active",
+  "background_maintenance": {
+    "plan_eligibility_before_apply": true,
+    "installed_packages_only": true,
+    "local_user_sources": "manual_required",
+    "native_freshness_without_probe": "currentness_not_checked",
+    "native_update": "idempotent_owner_refresh_then_fresh_callable_readback",
+    "base_apply": "stage_verified_generation_without_activation_or_temporal_restart",
+    "failure_isolation": "continue_unrelated_installed_packages"
+  },
   "surface_id": "opl_managed_updater_kernel",
   "public_cli_surfaces": [
     "opl update status --json",

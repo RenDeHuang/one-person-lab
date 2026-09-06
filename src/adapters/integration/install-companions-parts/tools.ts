@@ -615,6 +615,8 @@ function installOfficeCliTool(
   ensurePathEntry(localBin);
   const result = spawnSync(process.env.SHELL?.trim() || '/bin/bash', ['-lc', buildOfficeCliInstallCommand()], {
     encoding: 'utf8',
+    timeout: 300_000,
+    killSignal: 'SIGKILL',
     env: { ...process.env, HOME: dependencyHome, PATH: process.env.PATH },
     stdio: 'pipe',
   });
@@ -647,6 +649,8 @@ function installMineruOpenApiTool(
   ensurePathEntry(localBin);
   const result = spawnSync(process.env.SHELL?.trim() || '/bin/bash', ['-lc', buildMineruOpenApiInstallCommand()], {
     encoding: 'utf8',
+    timeout: 300_000,
+    killSignal: 'SIGKILL',
     env: { ...process.env, HOME: dependencyHome, PATH: process.env.PATH, npm_config_prefix: localPrefix, NPM_CONFIG_PREFIX: localPrefix },
     stdio: 'pipe',
   });

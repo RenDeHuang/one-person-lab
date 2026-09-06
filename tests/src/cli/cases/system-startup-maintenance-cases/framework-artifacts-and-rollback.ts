@@ -7,7 +7,7 @@ import {
   fetchFrameworkArtifactFromChannel,
   readFrameworkChannelEntry,
 } from '../../../../../src/adapters/integration/system-installation/framework-self-update-parts/channel-artifact.ts';
-import { readOplFrameworkRuntimeUpdateStatus } from '../../../../../src/adapters/integration/system-installation/framework-self-update.ts';
+import { readOplFrameworkRuntimeUpdateStatus, runOplFrameworkSelfUpdate } from '../../../../../src/adapters/integration/system-installation/framework-self-update.ts';
 
 function writeMinimalFrameworkRoot(root: string, marker: string) {
   fs.mkdirSync(path.join(root, 'src'), { recursive: true });
@@ -347,6 +347,23 @@ test('system startup-maintenance applies OPL Framework runtime archive to a mana
     assert.equal(metadata.pending_root, `${targetRoot}.pending`);
     assert.equal(metadata.source_archive, archivePath);
     assert.match(metadata.staging_process_instance_id, /^(headless-cli|app):/);
+    const previousTarget = process.env.OPL_FRAMEWORK_UPDATE_TARGET_ROOT;
+    try {
+      process.env.OPL_FRAMEWORK_UPDATE_TARGET_ROOT = targetRoot;
+      const pendingStatus = readOplFrameworkRuntimeUpdateStatus(targetRoot, { allowChannelLookup: false });
+      assert.equal(pendingStatus.pending_generation?.pending_root, `${targetRoot}.pending`);
+    } finally {
+      if (previousTarget === undefined) delete process.env.OPL_FRAMEWORK_UPDATE_TARGET_ROOT;
+      else process.env.OPL_FRAMEWORK_UPDATE_TARGET_ROOT = previousTarget;
+    }
+    const repeat = runOplFrameworkSelfUpdate({ targetRoot, sourceArchive: archivePath,
+      sourceArchiveSha256: sha256(archivePath), skipDependencyInstall: true, stageOnly: true });
+    assert.equal(repeat.reason, 'framework_runtime_artifact_pending_restart');
+    assert.equal(fs.readFileSync(path.join(targetRoot, 'MARKER.txt'), 'utf8'), 'old-framework\n');
+    const absentTarget = path.join(homeRoot, 'not-installed');
+    const skipped = runOplFrameworkSelfUpdate({ targetRoot: absentTarget, sourceArchive: archivePath, stageOnly: true });
+    assert.equal(skipped.reason, 'background_requires_existing_managed_framework');
+    assert.equal(fs.existsSync(absentTarget), false);
   } finally {
     fs.rmSync(codexFixture.fixtureRoot, { recursive: true, force: true });
     fs.rmSync(homeRoot, { recursive: true, force: true });

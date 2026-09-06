@@ -17,6 +17,11 @@ import { buildManagedUpdateKernelProjection } from '../../../../src/adapters/int
 import { runManagedUpdateKernelOperation } from '../../../../src/adapters/integration/index.ts';
 import { selectedManagedUpdateComponentIds } from '../../../../src/adapters/integration/managed-update-owner-boundary.ts';
 import { agentPackageManifest } from './packages-cases/helpers.ts';
+import { listCurrentPackageProjections } from '../../../../src/kernel/standard-agent-registry.ts';
+import { normalizePackageManifest } from '../../../../src/adapters/integration/agent-package-registry-parts/manifest-normalizers.ts';
+import { packageBackgroundUpdatePolicy } from '../../../../src/adapters/integration/agent-package-registry-parts/registry-status-projection.ts';
+import { discoverInstalledPackageDescriptors } from '../../../../src/adapters/integration/agent-package-registry-parts/installed-codex-plugin-directory.ts';
+import { runOplAgentPackageBulkUpdate } from '../../../../src/adapters/integration/agent-package-registry.ts';
 
 function readManagedUpdateKernelContract() {
   return parseJsonText(
@@ -33,6 +38,59 @@ function writeFixtureFile(root: string, relativePath: string, content: string) {
   fs.writeFileSync(targetPath, content);
   return targetPath;
 }
+
+test('native Package plan admits managed updates and isolates failed post-update readback', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-background-package-update-'));
+  const callsPath = path.join(root, 'calls');
+  const entries = ['mas', 'opl-flow'].map((packageId) => {
+    const projection = listCurrentPackageProjections().find((entry) => entry.payload.package_id === packageId)!;
+    const manifest = normalizePackageManifest(projection.payload, projection.source_ref);
+    const sourcePath = path.join(root, packageId);
+    const carrier = manifest.configured_codex_plugin_carrier!;
+    const pluginName = carrier.carrier.pluginId.split('@')[0];
+    writeFixtureFile(sourcePath, 'opl-package.json', JSON.stringify(projection.payload));
+    writeFixtureFile(sourcePath, '.codex-plugin/plugin.json', JSON.stringify({name: pluginName, version: manifest.version, skills: './skills/'}));
+    for (const skill of carrier.executor.requiredSkillIds) writeFixtureFile(sourcePath, `skills/${skill}/SKILL.md`, `# ${skill}\n`);
+    return {pluginId: carrier.carrier.pluginId, version: manifest.version, installed: true, enabled: true,
+      source: {source: 'local', path: sourcePath}, marketplaceSource: {sourceType: 'git', source: carrier.carrier.marketplaceSource}};
+  });
+  const readback = {installed: entries, available: [], marketplaces: entries.map((entry) => ({
+    name: entry.pluginId.split('@')[1], marketplaceSource: entry.marketplaceSource,
+  }))};
+  const binary = writeFixtureFile(root, 'codex.mjs', `#!/usr/bin/env node
+import fs from 'node:fs';
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(callsPath)}, args.join(' ') + '\\n');
+if (args[0] === 'plugin' && args[1] === 'add' && args[2] === ${JSON.stringify(entries[0].pluginId)}) {
+  fs.rmSync(${JSON.stringify(path.join(root, 'mas', 'skills'))}, {recursive: true, force: true});
+}
+process.stdout.write(${JSON.stringify(JSON.stringify(readback))});
+`);
+  fs.chmodSync(binary, 0o755);
+  const env = {HOME: root, CODEX_HOME: path.join(root, 'codex-home'), OPL_STATE_DIR: path.join(root, 'state'), OPL_CODEX_PLUGIN_BIN: binary};
+  const previous = new Map(Object.keys(env).map((key) => [key, process.env[key]]));
+  try {
+    Object.assign(process.env, env);
+    const planned = await buildManagedUpdateKernelProjection(loadFrameworkContracts(), {operation: 'plan', componentId: 'opl_packages'});
+    const component = planned.managed_update.components[0];
+    assert.equal(component.state, 'currentness_not_checked');
+    assert.equal(component.plan.action, 'update');
+    assert.equal(component.auto_apply.eligible, true);
+    assert.deepEqual(selectedManagedUpdateComponentIds({operation: 'apply'}, [component]), ['opl_packages']);
+    assert.doesNotMatch(fs.readFileSync(callsPath, 'utf8'), /plugin add|marketplace upgrade/);
+    const installed = discoverInstalledPackageDescriptors().get('opl-flow')!;
+    assert.equal(packageBackgroundUpdatePolicy({...installed, marketplaceSource: path.join(root, 'user-checkout')}).eligible, false);
+    assert.equal(packageBackgroundUpdatePolicy({...installed, enabled: false}).eligible, false);
+    assert.equal(packageBackgroundUpdatePolicy({...installed, marketplaceSource: path.join(env.OPL_STATE_DIR, 'codex-plugin-marketplaces', 'opl-flow')}).eligible, true);
+    const updated = await runOplAgentPackageBulkUpdate({background: true});
+    assert.deepEqual(updated.targets.map((entry) => [entry.target_id, entry.status]), [['mas', 'failed'], ['opl-flow', 'completed']]);
+    assert.match(fs.readFileSync(callsPath, 'utf8'), /plugin marketplace upgrade opl-flow --json/);
+    assert.match(fs.readFileSync(callsPath, 'utf8'), /plugin add opl-flow@opl-flow --json/);
+  } finally {
+    for (const [key, value] of previous) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
 
 let macAppCarrierFixtureQueue = Promise.resolve();
 
@@ -420,7 +478,7 @@ exit 2
     }) as Record<string, any>;
     const packages = output.managed_update.components[0];
 
-    assert.equal(packages.state, 'current');
+    assert.equal(packages.state, 'currentness_not_checked');
     assert.equal(packages.plan.action, 'none');
     assert.equal(packages.current.projection_source, 'installed_owner_descriptor');
     assert.equal(packages.current.installed_package_count, 1);
@@ -452,7 +510,7 @@ exit 2
     }) as Record<string, any>;
     const unaffectedPackages = unaffected.managed_update.components[0];
 
-    assert.equal(unaffectedPackages.state, 'current');
+    assert.equal(unaffectedPackages.state, 'currentness_not_checked');
     assert.equal(unaffectedPackages.plan.action, 'none');
     assert.equal(unaffectedPackages.auto_apply.eligible, false);
     assert.deepEqual(unaffectedPackages.auto_apply.blocked_reasons, []);

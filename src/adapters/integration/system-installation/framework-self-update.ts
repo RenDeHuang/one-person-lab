@@ -79,6 +79,7 @@ type FrameworkSelfUpdateInput = {
   sourceArchive?: string | null;
   sourceArchiveSha256?: string | null;
   allowChannelArtifact?: boolean;
+  stageOnly?: boolean;
   allowDirtySource?: boolean;
   skipDependencyInstall?: boolean;
 };
@@ -678,6 +679,14 @@ export function runOplFrameworkSelfUpdate(
   const targetRoot = path.resolve(input.targetRoot);
   const sourceArchiveRaw = resolveFrameworkUpdateArchive(input.sourceArchive);
   const sourceRootRaw = resolveFrameworkUpdateSource(input.sourceRoot);
+  if (input.stageOnly && (!isOplFrameworkRoot(targetRoot) || sourceRootRaw)) {
+    return buildResult('skipped', 'background_requires_existing_managed_framework', {
+      target_root: targetRoot, source_root: sourceRootRaw, source_head_sha: null,
+      source_archive: null, source_archive_sha256: null, previous_root: null,
+      rollback_ref: null, copied_file_count: 0,
+      dependency_install: skippedDependencyInstall(false), metadata_ref: null,
+    });
+  }
   const allowChannelArtifact = input.allowChannelArtifact !== false && !shouldDisableRemoteFrameworkArtifact();
   const archiveOrChannelApplyRequested = Boolean(sourceArchiveRaw || (!sourceRootRaw && allowChannelArtifact));
   const dockerWebuiCarrier = !sourceArchiveRaw && !sourceRootRaw
@@ -1009,6 +1018,16 @@ export function readOplFrameworkRuntimeUpdateStatus(
   }
   const previousRoot = `${targetRoot}${FRAMEWORK_PREVIOUS_ROOT_SUFFIX}`;
   const metadataPath = path.join(targetRoot, FRAMEWORK_SOURCE_METADATA_FILE);
+  let pendingGeneration: FrameworkPendingMetadata | null = null;
+  try {
+    const pending = readJsonPayloadFile(`${targetRoot}${FRAMEWORK_PENDING_METADATA_SUFFIX}`);
+    if (isRecord(pending) && pending.surface_kind === 'opl_framework_pending_generation.v1'
+      && pending.target_root === targetRoot
+      && pending.pending_root === `${targetRoot}${FRAMEWORK_PENDING_ROOT_SUFFIX}`
+      && isOplFrameworkRoot(pending.pending_root)) {
+      pendingGeneration = pending as FrameworkPendingMetadata;
+    }
+  } catch { /* No verified pending generation. */ }
   const channelArtifactAvailable = Boolean(channelEntry?.artifact);
   const channelArtifactCurrent = Boolean(channelEntry && fs.existsSync(targetRoot) && frameworkSourceAlreadyCurrent(targetRoot, {
     sourceHeadSha: channelEntry.source_git_head_sha,
@@ -1016,6 +1035,7 @@ export function readOplFrameworkRuntimeUpdateStatus(
   }));
   return {
     target_root: targetRoot,
+    pending_generation: pendingGeneration,
     target_valid: fs.existsSync(targetRoot) && fs.statSync(targetRoot).isDirectory() && isOplFrameworkRoot(targetRoot),
     target_is_developer_checkout: fs.existsSync(targetRoot) && isGitRepo(targetRoot),
     source_archive: sourceArchive,

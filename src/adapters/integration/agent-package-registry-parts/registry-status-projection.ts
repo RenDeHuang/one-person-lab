@@ -3,7 +3,10 @@ import { FrameworkContractError } from '../../../kernel/contract-validation.ts';
 import { refsOnlyAuthorityBoundary } from '../../../kernel/refs-only-authority-boundary.ts';
 import { resolveOplStatePaths } from '../../../kernel/runtime-state-paths.ts';
 import { compare } from 'semver';
+import path from 'node:path';
 import { canonicalAgentPackageId } from '../agent-package-identity.ts';
+import { isFirstPartyPackage } from '../agent-package-first-party.ts';
+import { githubMarketplaceSourceIdentity, sameMarketplaceSource } from './shared.ts';
 import { listAgentPackageSettingsActions } from '../agent-package-actions.ts';
 import {
   discoverAvailablePackageDescriptors,
@@ -51,6 +54,30 @@ export function packageSnapshot(input: { includeAvailable?: boolean } = {}): Pac
     descriptors,
     installed,
   };
+}
+
+export function packageBackgroundUpdatePolicy(descriptor: InstalledPackageDescriptor) {
+  const declaredSource = descriptor.carrier.carrier.marketplaceSource;
+  const marketplaceId = descriptor.pluginId.split('@')[1];
+  const managedPayloadSource = marketplaceId && descriptor.marketplaceSource && declaredSource
+    && githubMarketplaceSourceIdentity(declaredSource)
+    && path.resolve(descriptor.marketplaceSource) === path.join(
+      resolveOplStatePaths().state_dir, 'codex-plugin-marketplaces', marketplaceId,
+    );
+  const reason = !descriptor.readiness.installed
+    ? 'package_not_installed'
+    : !isFirstPartyPackage(descriptor.manifest.package_id)
+      ? 'external_package_explicit_update_only'
+      : !declaredSource || !githubMarketplaceSourceIdentity(declaredSource)
+        || (!managedPayloadSource && !sameMarketplaceSource(descriptor.marketplaceSource, declaredSource))
+        ? 'local_or_user_managed_source'
+        : !descriptor.enabled && descriptor.manifest.codex_interaction_mode !== 'headless_internal'
+          ? 'user_disabled_package'
+          : descriptor.readiness.physical_status !== 'available'
+            || (descriptor.readiness.projection_callability ?? descriptor.readiness.callability) !== 'callable'
+            ? 'native_carrier_attention_required'
+            : null;
+  return { eligible: reason === null, reason };
 }
 
 export function requirePackageId(value: string | null | undefined, action: string) {

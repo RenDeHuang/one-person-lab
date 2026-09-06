@@ -62,9 +62,6 @@ exit 2
 
   try {
     for (const operation of ['apply', 'repair', 'rollback'] as const) {
-      if (operation === 'apply') {
-        continue;
-      }
       const output = runCli(['update', operation], {
         HOME: homeRoot,
         CODEX_HOME: path.join(homeRoot, 'codex-home'),
@@ -132,6 +129,18 @@ exit 2
       assert.equal(output.managed_update.receipts.write_policy, 'recorded_component_receipt');
       const baseComponent = output.managed_update.components.find((entry) => entry.component_id === 'opl_base');
       assert.equal(Boolean(baseComponent), true);
+      if (operation === 'apply') {
+        const startup = (output.managed_update.execution.adapter_results[0].result as any).startup_maintenance.details;
+        assert.equal(startup.stage_only, true);
+        assert.equal(startup.pending_runtime_activation.status, 'deferred_background_maintenance');
+        assert.equal(startup.temporal_runtime_reconcile, null);
+        assert.equal(startup.seed_boundary, null);
+        assert.match(fs.readFileSync(runtimeCodex, 'utf8'), /0\.130\.0/);
+        assert.equal((baseComponent as any).state, 'needs_restart');
+        assert.equal((baseComponent as any).status_detail.component_state, 'needs_restart');
+        assert.equal((baseComponent as any).post_apply_guidance.reload_guidance.reload_required, true);
+        assert.equal((baseComponent as any).auto_apply.eligible, false);
+      }
       assert.equal(baseComponent?.authority_boundary.can_mutate_app_owned_runtime_root, true);
       assert.equal(
         baseComponent?.plan.command_refs.every((entry) => entry.destructive === false),

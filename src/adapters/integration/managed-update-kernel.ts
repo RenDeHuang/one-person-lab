@@ -1,6 +1,7 @@
 import { readOplUpdateChannel, readOplWorkspaceRoot } from '../../kernel/system-preferences.ts';
 import type { FrameworkContracts } from '../../kernel/types.ts';
 import { resolveCodexVersion } from './system-installation/engine-helpers.ts';
+import { packageBackgroundUpdatePolicy } from './agent-package-registry-parts/registry-status-projection.ts';
 import {
   discoverInstalledPackageDescriptors,
   installedDescriptorMatchesConfiguredCarrier,
@@ -74,7 +75,8 @@ function packageProjection(descriptor: InstalledPackageDescriptor) {
   return {
     package_id: descriptor.manifest.package_id,
     label: descriptor.manifest.display_name,
-    state: callable ? 'current' as const : 'failed_with_repair' as const,
+    state: callable ? 'currentness_not_checked' as const : 'failed_with_repair' as const,
+    background_update: packageBackgroundUpdatePolicy(descriptor),
     installed_owner_descriptor: {
       manifest_path: descriptor.manifestPath,
       manifest_sha256: descriptor.manifest_sha256,
@@ -97,11 +99,15 @@ function buildCapabilityPackagesComponent(
 ): ManagedUpdateComponent {
   const packageStates = descriptors.map(packageProjection);
   const failedCount = packageStates.filter((entry) => entry.state === 'failed_with_repair').length;
-  const callableCount = packageStates.length - failedCount;
+  const eligibleCount = packageStates.filter((entry) => entry.background_update.eligible).length;
   const actionRequested = operation === 'apply' || operation === 'repair';
-  const autoApplyEligible = operation === 'apply' && callableCount > 0;
-  const state: ManagedUpdateComponentState = failedCount > 0 ? 'failed_with_repair' : 'current';
-  const action = failedCount > 0
+  const autoApplyEligible = ['check', 'plan', 'apply'].includes(operation) && eligibleCount > 0;
+  const state: ManagedUpdateComponentState = failedCount > 0
+    ? 'failed_with_repair'
+    : packageStates.length > 0 ? 'currentness_not_checked' : 'current';
+  const action = autoApplyEligible
+    ? 'update'
+    : failedCount > 0
     ? 'manual_review'
     : operation === 'repair' && packageStates.length > 0
       ? 'install'
@@ -113,8 +119,8 @@ function buildCapabilityPackagesComponent(
   const detail = statusDetail({
     component_state: state,
     auto_apply_eligible: autoApplyEligible,
-    app_background_safe: callableCount > 0,
-    clean_managed_targets_count: callableCount,
+    app_background_safe: eligibleCount > 0,
+    clean_managed_targets_count: eligibleCount,
     failed_targets_count: failedCount,
     post_apply_status: actionRequested ? 'not_run' : 'skipped',
     reload_status: failedCount > 0 ? 'manual_required' : 'not_required',
@@ -182,7 +188,7 @@ function buildCapabilityPackagesComponent(
     auto_apply: {
       mode: autoApplyEligible ? 'auto_apply' : failedCount > 0 ? 'manual_required' : 'projection_only',
       eligible: autoApplyEligible,
-      app_background_safe: callableCount > 0,
+      app_background_safe: eligibleCount > 0,
       scope: 'installed_package_owner_channels_only',
       command_ref: autoApplyEligible ? updateCommand : null,
       blocked_reasons: failedCount > 0 ? ['native_carrier_attention_required'] : [],
@@ -196,10 +202,10 @@ function buildCapabilityPackagesComponent(
     plan: {
       action,
       summary: action === 'none'
-        ? 'Installed Package owner descriptors and native carriers are callable.'
+        ? 'Installed Package callability was read back; upstream freshness has not been checked.'
         : action === 'manual_review'
           ? 'One or more installed Package carriers require owner repair.'
-          : 'Delegate the requested Package operation to each installed owner native carrier.',
+          : 'Refresh eligible installed Packages through their native carriers and verify fresh callability.',
       command_refs: action === 'manual_review'
         ? [manualCommand('inspect_packages', 'opl packages list --json', 'Inspect native carrier blockers.')]
         : action === 'none'
@@ -261,7 +267,8 @@ export async function buildManagedUpdateKernelProjection(
   }
   if (shouldBuildComponent(requested, 'opl_packages')) {
     const descriptors = [...discoverInstalledPackageDescriptors().values()]
-      .filter(installedDescriptorMatchesConfiguredCarrier);
+      .filter((descriptor) => installedDescriptorMatchesConfiguredCarrier(descriptor)
+        && descriptor.carrier_readback.kind !== 'project_local_owner_projection');
     components.push(buildCapabilityPackagesComponent(descriptors, channel, input.operation));
   }
   const selectedComponents = filterManagedUpdateComponents(

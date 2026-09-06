@@ -54,6 +54,7 @@ type AgentPackageOwnerUpdateTarget = {
 export type ManagedUpdateKernelOwnerExecutors = {
   runAgentPackageBulkUpdate(input: {
     action: 'update' | 'repair';
+    background?: boolean;
   }): Promise<{
     targets: AgentPackageOwnerUpdateTarget[];
   }>;
@@ -114,6 +115,7 @@ function normalizeError(error: unknown) {
 async function runRuntimeSubstrateAdapter(
   contracts: FrameworkContracts,
   operation: ManagedUpdateKernelInput['operation'],
+  background = false,
 ): Promise<AdapterExecutionResult> {
   const receiptRef = runtimeAdapterReceiptRef(operation);
   const rollbackRef = runtimeRollbackRef(receiptRef);
@@ -148,19 +150,20 @@ async function runRuntimeSubstrateAdapter(
     };
   }
 
-  const result = await runOplStartupMaintenance(contracts, { scope: 'runtime_substrate' });
+  const result = await runOplStartupMaintenance(contracts, { scope: 'runtime_substrate', stageOnly: background, updateLockHeld: true });
   const systemAction = result.system_action as Record<string, unknown>;
   const dependencyReconcile = reconcileBaseManagedDependencies(process.env.HOME?.trim() || process.cwd());
+  const status = dependencyReconcile.status === 'attention_needed' ? 'partial_failure' : systemActionStatus(systemAction);
   return {
     component_id: 'opl_base',
     adapter_id: 'runtime_substrate_adapter',
-    status: systemActionStatus(systemAction),
+    status,
     reason: 'startup_maintenance_runtime_substrate_adapter',
     result_ref: receiptRef,
     result: {
       surface_kind: 'runtime_substrate_adapter_result',
       action: operation,
-      status: systemActionStatus(systemAction),
+      status,
       receipt_ref: receiptRef,
       rollback_ref: rollbackRef,
       repair_action: 'run_startup_maintenance',
@@ -223,6 +226,7 @@ function buildAgentPackageStatusDetail(input: {
 async function runAgentPackageAdapter(
   operation: ManagedUpdateKernelInput['operation'],
   executors: ManagedUpdateKernelOwnerExecutors,
+  background = false,
 ): Promise<AdapterExecutionResult> {
   if (operation === MANAGED_UPDATE_OWNER_ACTIONS.revert) {
     const targets: Record<string, unknown>[] = [];
@@ -268,6 +272,7 @@ async function runAgentPackageAdapter(
 
   const ownerUpdate = await executors.runAgentPackageBulkUpdate({
     action: operation === 'repair' ? 'repair' : 'update',
+    background,
   });
   const targets = ownerUpdate.targets;
   const manualCount = targets.filter((target) => target.status === 'manual_required').length;
@@ -371,13 +376,14 @@ async function runAdapter(
   operation: ManagedUpdateKernelInput['operation'],
   componentId: string,
   executors: ManagedUpdateKernelOwnerExecutors,
+  background = false,
 ): Promise<AdapterExecutionResult> {
   try {
     if (componentId === 'opl_base') {
-      return await runRuntimeSubstrateAdapter(contracts, operation);
+      return await runRuntimeSubstrateAdapter(contracts, operation, background);
     }
     if (componentId === 'opl_packages') {
-      return await runAgentPackageAdapter(operation, executors);
+      return await runAgentPackageAdapter(operation, executors, background);
     }
     return {
       component_id: componentId,
@@ -460,7 +466,7 @@ function applyExecutionToProjection(
         post_apply_action_statuses: receipt.post_apply_action_statuses,
         reload_guidance: receipt.reload_guidance,
       },
-      status_detail: receipt.status_detail,
+      status_detail: component.component_id === 'opl_base' ? component.status_detail : receipt.status_detail,
       auto_apply: {
         ...component.auto_apply,
         eligible: receipt.status_detail.auto_apply_eligible ?? component.auto_apply.eligible,
@@ -468,7 +474,8 @@ function applyExecutionToProjection(
       },
       post_apply_guidance: {
         ...component.post_apply_guidance,
-        reload_guidance: receipt.reload_guidance,
+        reload_guidance: component.component_id === 'opl_base'
+          ? component.post_apply_guidance.reload_guidance : receipt.reload_guidance,
       },
     };
   });
@@ -538,6 +545,7 @@ export async function runManagedUpdateKernelOperation(
         input.operation,
         componentId,
         executors,
+        input.operation === 'apply' && !input.componentId,
       );
       results.push(component ? bindOwnerExecutionResult(component, result) : result);
     }

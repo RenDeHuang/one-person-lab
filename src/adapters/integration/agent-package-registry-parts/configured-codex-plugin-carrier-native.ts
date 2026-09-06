@@ -73,6 +73,8 @@ export function defaultRunner(input: {
   const result = spawnSync(input.binary, input.args, {
     encoding: 'utf8',
     env: input.env,
+    timeout: 120_000,
+    killSignal: 'SIGKILL',
   });
   return {
     status: result.status,

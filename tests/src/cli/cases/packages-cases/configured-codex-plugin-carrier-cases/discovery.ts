@@ -1003,8 +1003,10 @@ test('package status projects and bulk update visits required installed owner de
       'mas',
     ]);
     assert.deepEqual(bulkUpdate.targets.map((target: any) => target.status), [
-      'completed',
+      'failed',
     ], JSON.stringify(bulkUpdate, null, 2));
+    assert.equal((bulkUpdate.targets[0] as any).error.error.details.failure_code,
+      'agent_package_native_post_update_readback_failed');
     assert.deepEqual(
       fs.readFileSync(callsPath, 'utf8').trim().split('\n')
       .filter((command) => command.startsWith('plugin add ')),

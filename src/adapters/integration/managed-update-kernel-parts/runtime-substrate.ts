@@ -54,22 +54,34 @@ export function buildRuntimeSubstrateComponent(
   const currentPointer = runtimeSubstrate?.current_root ?? null;
   const stagedRoot = runtimeSubstrate?.staging_root ?? null;
   const rollbackPointer = runtimeSubstrate?.rollback_pointer ?? null;
+  const restartPending = Boolean(runtimeSubstrate?.pending_generation || frameworkRuntime.pending_generation);
   const state: ManagedUpdateComponentState =
     !installed
       ? 'failed_with_repair'
+      : restartPending
+        ? 'needs_restart'
       : updateAvailable
         || (runtimeLatestStatus === 'outdated' && codexDependency?.update_mode === 'silent_managed')
         || frameworkUpdateAvailable
         || managedDependencyUpdateAvailable
         ? 'update_available'
         : 'current';
-  const action = state === 'current' ? 'none' : state === 'failed_with_repair' ? 'install' : 'update';
+  const action = state === 'current' || restartPending ? 'none' : state === 'failed_with_repair' ? 'install' : 'update';
   const postApplyHooks = ['startup_smoke', 'apply_opl_framework_runtime', 'swap_runtime_current_pointer_with_rollback'];
   const detail = statusDetail({
     component_state: state,
+    reload_status: restartPending ? 'required' : 'not_required',
     post_apply_status: state === 'current' ? 'skipped' : 'not_run',
   });
   const reloadGuidance = noReloadGuidance();
+  if (restartPending) {
+    Object.assign(reloadGuidance, {
+      reload_required: true,
+      reload_targets: ['one_person_lab_app'],
+      command_ref: 'Restart One Person Lab App',
+      reason: 'Verified runtime updates are staged for the next App restart.',
+    });
+  }
   const route = ownerRoute({
     owner: 'one-person-lab-app-and-opl-framework',
     authority_surface: 'App-owned runtime root and OPL framework runtime artifact channel',
@@ -178,15 +190,15 @@ export function buildRuntimeSubstrateComponent(
     postApplyHooks,
     auto_apply: {
       mode: 'controlled_apply',
-      eligible: state !== 'current' && !developerSourceOverride,
-      app_background_safe: false,
+      eligible: state === 'update_available' && !developerSourceOverride,
+      app_background_safe: installed && !developerSourceOverride,
       scope: 'app_owned_runtime_root_only',
-      command_ref: state === 'current' || developerSourceOverride
+      command_ref: state !== 'update_available' || developerSourceOverride
         ? null
         : 'opl system startup-maintenance --json',
       blocked_reasons: [
-        ...(state !== 'current' && !developerSourceOverride
-          ? ['explicit_controlled_apply_required']
+        ...(!installed
+          ? ['initial_runtime_install_requires_startup_maintenance']
           : []),
         ...(developerSourceOverride ? ['developer_framework_source_override_detect_only'] : []),
       ],
@@ -223,7 +235,7 @@ export function buildRuntimeSubstrateComponent(
           ),
         ],
     },
-    receipt: componentReceipt({
+    receipt: { ...componentReceipt({
       component_id: 'opl_base',
       sourceManifestRef: 'app-runtime-update-channel.json',
       from_version: typeof codex?.version === 'string' ? codex.version : null,
@@ -234,7 +246,7 @@ export function buildRuntimeSubstrateComponent(
       reload_guidance: reloadGuidance,
       repair_action: state === 'failed_with_repair' ? 'run_startup_maintenance' : null,
       contentIdentityFields: ['runtime_version', 'sha256', 'current_pointer', 'staged_root', 'opl_framework_runtime'],
-    }),
+    }), reload_guidance: reloadGuidance },
     authority_boundary: {
       can_mutate_app_owned_runtime_root: true,
       can_mutate_opl_framework_runtime: true,
