@@ -16,6 +16,7 @@ import type {
 } from '../../authority/evolution/index.ts';
 import { FileFoundryContentStore, foundryStoragePaths } from '../../authority/evidence/index.ts';
 import { runFamilyRuntime } from './family-runtime.ts';
+import { materializeFoundrySourceArtifacts } from './foundry-source-material.ts';
 import {
   appendDistinctStageRunObservation,
   summarizeStageRunObservation,
@@ -78,11 +79,19 @@ export interface FoundryProviderStageRunGateway {
   query(workflowId: string): Promise<unknown>;
 }
 
+export type FoundryStageRouteCompositionFactory = NonNullable<
+  NonNullable<Parameters<typeof runFamilyRuntime>[1]>['createStageRouteComposition']
+>;
+
 export class OplFoundryProviderStageRunGateway implements FoundryProviderStageRunGateway {
   readonly #runFamilyRuntime: typeof runFamilyRuntime;
+  readonly #createStageRouteComposition?: FoundryStageRouteCompositionFactory;
 
-  constructor(runStageRuntime: typeof runFamilyRuntime = runFamilyRuntime) {
+  constructor(runStageRuntime: typeof runFamilyRuntime = runFamilyRuntime, options: {
+    create_stage_route_composition?: FoundryStageRouteCompositionFactory;
+  } = {}) {
     this.#runFamilyRuntime = runStageRuntime;
+    this.#createStageRouteComposition = options.create_stage_route_composition;
   }
 
   async launch(input: Parameters<FoundryProviderStageRunGateway['launch']>[0]) {
@@ -112,17 +121,19 @@ export class OplFoundryProviderStageRunGateway implements FoundryProviderStageRu
       input.activity.input_digest,
       '--stage-run-invocation-id',
       input.stage_run_invocation_id,
-      '--task-id',
+      '--task',
       input.activity.run_id,
       '--start',
     ];
     for (let index = 0; index < input.input_artifact_refs.length; index += 1) {
       args.push('--input-artifact-ref', input.input_artifact_refs[index]!);
-      args.push('--input-artifact-hash', input.input_artifact_hashes[index]!);
+      args.push('--input-artifact-sha256', input.input_artifact_hashes[index]!);
     }
     let launched: Awaited<ReturnType<typeof runFamilyRuntime>>;
     try {
-      launched = await this.#runFamilyRuntime(args);
+      launched = await this.#runFamilyRuntime(args, {
+        createStageRouteComposition: this.#createStageRouteComposition,
+      });
     } catch (error) {
       if (error instanceof FrameworkContractError) throw error;
       throw new FoundryTransientActivityError('Foundry provider StageRun launch failed transiently.', { cause: error });
@@ -202,6 +213,7 @@ function writeActivityInput(input: {
   provider: FoundryProviderManifest;
   activity: FoundryActivityIdentity;
   payload: JsonRecord;
+  sourceArtifacts: ReturnType<typeof materializeFoundrySourceArtifacts>;
 }) {
   const bytes = canonicalJsonBytes({
     surface_kind: 'opl_foundry_provider_activity_input',
@@ -209,6 +221,7 @@ function writeActivityInput(input: {
     operation: input.operation,
     activity: input.activity,
     payload: input.payload,
+    source_artifacts: input.sourceArtifacts,
     output_contract: {
       provider_manifest_digest: foundryContentDigest(input.provider),
       ...input.provider.operations[input.operation],
@@ -335,10 +348,13 @@ export class StageRunFoundryProviderInvoker implements FoundryProviderOperationI
     storage_root?: string;
     poll_interval_ms?: number;
     timeout_ms?: number;
+    create_stage_route_composition?: FoundryStageRouteCompositionFactory;
   } = {}) {
     this.#storageRoot = input.storage_root ?? foundryStoragePaths().root;
     fs.mkdirSync(this.#storageRoot, { recursive: true });
-    this.#gateway = input.gateway ?? new OplFoundryProviderStageRunGateway();
+    this.#gateway = input.gateway ?? new OplFoundryProviderStageRunGateway(runFamilyRuntime, {
+      create_stage_route_composition: input.create_stage_route_composition,
+    });
     this.#artifactReader = input.artifact_reader ?? new FileFoundryProviderArtifactReader({
       allowed_root: defaultTransportRoot(this.#storageRoot),
     });
@@ -355,12 +371,17 @@ export class StageRunFoundryProviderInvoker implements FoundryProviderOperationI
     if (!allowedStages.has(operation.entry_stage_ref) || !allowedStages.has(operation.terminal_stage_ref)) {
       fail('Foundry provider operation entry or terminal Stage is outside its declared Stage set.');
     }
+    const sourceArtifacts = materializeFoundrySourceArtifacts({
+      sourceRefs: input.payload.request?.source_refs ?? [],
+      storageRoot: this.#storageRoot,
+    });
     const activityInput = writeActivityInput({
       storageRoot: this.#storageRoot,
       operation: input.operation,
       provider: input.provider,
       activity: input.activity,
       payload: input.payload,
+      sourceArtifacts,
     });
     const workspaceRoot = path.join(this.#storageRoot, 'provider-runs', activityKey(input.activity));
     fs.mkdirSync(workspaceRoot, { recursive: true });
@@ -372,8 +393,8 @@ export class StageRunFoundryProviderInvoker implements FoundryProviderOperationI
       stage_id: operation.entry_stage_ref,
       stage_run_invocation_id: firstInvocationId,
       activity: input.activity,
-      input_artifact_refs: [activityInput.ref],
-      input_artifact_hashes: [activityInput.sha256],
+      input_artifact_refs: [activityInput.ref, ...sourceArtifacts.map((entry) => entry.ref)],
+      input_artifact_hashes: [activityInput.sha256, ...sourceArtifacts.map((entry) => entry.sha256)],
     })).workflow_id;
     const deadline = Date.now() + this.#timeoutMs;
     const visitedWorkflows = new Set<string>();

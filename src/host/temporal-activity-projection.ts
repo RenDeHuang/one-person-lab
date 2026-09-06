@@ -29,6 +29,7 @@ export function buildCordisTemporalActivities() {
   return {
     ...buildFoundryTemporalActivities(() => createProductionFoundryKernel({
       create_foundry_dev_composition: createCordisFoundryDevComposition,
+      create_stage_route_composition: createStageRouteComposition,
     })),
     codexStageActivity: (input: Parameters<typeof codexStageActivity>[0]) =>
       codexStageActivity(input, {

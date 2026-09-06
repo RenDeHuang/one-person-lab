@@ -7,6 +7,8 @@ import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 
 import { canonicalJsonBytes } from '../../src/kernel/canonical-json.ts';
+import { parseFamilyRuntimeCommand } from '../../src/adapters/execution/family-runtime-command.ts';
+import { createCordisStageRouteComposition } from '../../src/host/plugins/cordis-agent-executor-experiment.ts';
 import {
   FOUNDRY_PROTOCOL_VERSION,
   foundryContentDigest,
@@ -131,6 +133,37 @@ for (const operation of ['design', 'diagnose'] as const) {
   });
 }
 
+test('StageRun provider binds admitted source bytes to its actual initial launch', async (t) => {
+  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-foundry-source-launch-'));
+  t.after(() => fs.rmSync(storageRoot, { recursive: true, force: true }));
+  const bytes = Buffer.from('An arbitrary source body, transported exactly.\n');
+  const content = new FileFoundryContentStore(storageRoot).put(bytes);
+  const sourceRef = `source-material:${content.digest}`;
+  const stopped = new Error('captured source launch');
+  const invoker = new StageRunFoundryProviderInvoker({
+    storage_root: storageRoot,
+    gateway: {
+      async launch(input) {
+        assert.equal(input.input_artifact_refs.length, 2);
+        const activityInput = JSON.parse(fs.readFileSync(new URL(input.input_artifact_refs[0]!), 'utf8'));
+        assert.deepEqual(activityInput.source_artifacts, [{
+          source_ref: sourceRef,
+          ref: input.input_artifact_refs[1],
+          sha256: input.input_artifact_hashes[1],
+        }]);
+        assert.equal(input.input_artifact_hashes[1], content.digest.slice(7));
+        assert.deepEqual(fs.readFileSync(new URL(input.input_artifact_refs[1]!)), bytes);
+        throw stopped;
+      },
+      async query() { throw new Error('not used'); },
+    },
+  });
+  await assert.rejects(invoker.invoke({
+    operation: 'design', provider, checkout_root: '/managed/provider', activity,
+    payload: { request: { source_refs: [sourceRef] } as never },
+  }), (error) => error === stopped);
+});
+
 test('StageRun provider rejects a report wrapping the raw terminal protocol object', async (t) => {
   const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-foundry-output-wrapper-'));
   t.after(() => fs.rmSync(storageRoot, { recursive: true, force: true }));
@@ -174,6 +207,11 @@ test('StageRun gateway uses the provider-declared public action instead of an OM
   let args: string[] = [];
   const gateway = new OplFoundryProviderStageRunGateway((async (input: string[]) => {
     args = input;
+    const command = parseFamilyRuntimeCommand(input);
+    assert.equal(command.mode, 'attempt_create');
+    if (command.mode !== 'attempt_create') throw new Error('Expected attempt_create');
+    assert.equal(command.input.taskId, activity.run_id);
+    assert.deepEqual(command.input.inputArtifactHashes, [`sha256:${'2'.repeat(64)}`]);
     return {
       family_runtime_stage_run: {
         stage_run_input: { workflow_id: 'workflow:provider-action' },
@@ -191,6 +229,35 @@ test('StageRun gateway uses the provider-declared public action instead of an OM
     input_artifact_hashes: [`sha256:${'2'.repeat(64)}`],
   });
   assert.equal(args[args.indexOf('--action') + 1], 'engineer-fixture');
+});
+
+test('StageRun gateway forwards the Host Stagecraft composition to the runtime boundary', async () => {
+  let composed = false;
+  const gateway = new OplFoundryProviderStageRunGateway((async (_args, options) => {
+    assert.equal(options?.createStageRouteComposition, createCordisStageRouteComposition);
+    const composition = await options!.createStageRouteComposition!({});
+    try {
+      assert.equal(typeof composition.stageBinding.resolve, 'function');
+      assert.equal(typeof composition.stageContext.observe, 'function');
+      composed = true;
+    } finally {
+      await composition.dispose();
+    }
+    return { family_runtime_stage_run: { stage_run_input: { workflow_id: 'workflow:composition' } } };
+  }) as typeof import('../../src/adapters/execution/family-runtime.ts').runFamilyRuntime, {
+    create_stage_route_composition: createCordisStageRouteComposition,
+  });
+  await gateway.launch({
+    provider,
+    checkout_root: '/managed/provider',
+    workspace_root: '/managed/workspace',
+    stage_id: 'mission-intake',
+    stage_run_invocation_id: 'sri:composition',
+    activity,
+    input_artifact_refs: [],
+    input_artifact_hashes: [],
+  });
+  assert.equal(composed, true);
 });
 
 test('Foundry provider manifest rejects every unknown field and contradictory authority at intake', async (t) => {

@@ -17,7 +17,10 @@ import {
   LedgerFoundryOperationResultJournal,
   LedgerVersionRegistry,
 } from '../../authority/evidence/index.ts';
-import { StageRunFoundryProviderInvoker } from './foundry-provider-stage-run.ts';
+import {
+  StageRunFoundryProviderInvoker,
+  type FoundryStageRouteCompositionFactory,
+} from './foundry-provider-stage-run.ts';
 import { configuredFoundryEvaluationExecutor } from './foundry-process-evaluator.ts';
 import { HostedFoundryActivationRuntime } from './foundry-activation-runtime.ts';
 import { DefaultHostedAgentRuntimeBindingResolver } from './hosted-agent-runtime-binding.ts';
@@ -43,6 +46,7 @@ export async function createProductionFoundryKernel(input: {
   semantic_provider_agent_id?: string;
   resolve_managed_checkout?: typeof resolveStandardAgentManagedCheckout;
   create_foundry_dev_composition?: FoundryDevCompositionFactory;
+  create_stage_route_composition?: FoundryStageRouteCompositionFactory;
 } = {}) {
   if (
     input.trusted_evaluation_runtime
@@ -59,10 +63,6 @@ export async function createProductionFoundryKernel(input: {
   }
   const storage = foundryStoragePaths(input.root_override);
   fs.mkdirSync(storage.root, { recursive: true });
-  const managed = await (input.resolve_managed_checkout ?? resolveStandardAgentManagedCheckout)({
-    domainId: input.semantic_provider_agent_id ?? 'oma',
-    workspaceRoot: storage.root,
-  });
   const compiler = new ContentAddressedCandidateCompiler(input.root_override);
   const contentRefs = new FileFoundryContentStore(input.root_override);
   const evaluator = input.trusted_evaluation_runtime ?? configuredFoundryEvaluationExecutor({
@@ -79,8 +79,14 @@ export async function createProductionFoundryKernel(input: {
       { failure_code: 'host_foundry_dev_composition_factory_missing' },
     );
   }
+  let managed;
   let providerManifest;
   try {
+    managed = await (input.resolve_managed_checkout ?? resolveStandardAgentManagedCheckout)({
+      domainId: input.semantic_provider_agent_id ?? 'oma',
+      workspaceRoot: storage.root,
+      refreshWorkspaceSkills: foundryComposition.services.refreshWorkspaceSkills,
+    });
     providerManifest = foundryComposition.services.foundryProviderManifest.read(
       managed.checkout_root,
     );
@@ -91,7 +97,10 @@ export async function createProductionFoundryKernel(input: {
     designer: new ManifestFoundryDesignerAdapter({
       checkout_root: managed.checkout_root,
       provider_manifest: providerManifest,
-      invoker: new StageRunFoundryProviderInvoker({ storage_root: storage.root }),
+      invoker: new StageRunFoundryProviderInvoker({
+        storage_root: storage.root,
+        create_stage_route_composition: input.create_stage_route_composition,
+      }),
     }),
     compiler,
     evaluator,
