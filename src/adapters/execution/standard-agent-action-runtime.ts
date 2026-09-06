@@ -133,10 +133,15 @@ function canonicalTimeoutMs(value?: number) {
 
 function standardAgentRuntimeResolver(
   dependencies: RuntimeDependencies,
+  invocationContext?: symbol,
 ): Pick<HostedAgentRuntimeBindingResolver, 'resolve' | 'resolvePinned'> {
+  const resolveManagedCheckout = dependencies.resolveManagedCheckout ?? resolveStandardAgentManagedCheckout;
   const defaultResolver = new DefaultHostedAgentRuntimeBindingResolver({
     root_override: dependencies.foundryRootOverride,
-    resolve_managed_checkout: dependencies.resolveManagedCheckout ?? resolveStandardAgentManagedCheckout,
+    // Internal authority requests already bind workspace bytes for CAS.
+    resolve_managed_checkout: invocationContext === INTERNAL_STANDARD_AGENT_ACTION_INVOCATION
+      ? (input) => resolveManagedCheckout({ ...input, preserveWorkspaceForAuthorityEvaluation: true })
+      : resolveManagedCheckout,
   });
   return dependencies.resolveRuntimeBinding
     ? {
@@ -1596,7 +1601,7 @@ export async function runStandardAgentAction(
     });
   }
 
-  const runtimeResolver = standardAgentRuntimeResolver(dependencies);
+  const runtimeResolver = standardAgentRuntimeResolver(dependencies, invocationContext);
   const runtimeBinding = frozenBinding
     ? await runtimeResolver.resolvePinned({
         provenance: frozenBinding.hosted_runtime_binding,
@@ -1776,7 +1781,7 @@ export function runStandardAgentQualificationProvisioning(
     ...dependencies,
     resolveManagedCheckout: (checkoutInput) => resolveManagedCheckout({
       ...checkoutInput,
-      preserveWorkspaceForQualificationProvisioning: true,
+      preserveWorkspaceForAuthorityEvaluation: true,
     }),
   }, QUALIFICATION_PROVISIONING_INVOCATION);
 }

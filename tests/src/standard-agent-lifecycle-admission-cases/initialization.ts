@@ -71,10 +71,16 @@ function stageDependencies(input: {
   runHandler: ReturnType<typeof initializationAuthorityHandler>;
   onAttempt: () => void;
 }) {
+  let workspaceEnsures = 0;
   return {
-    resolveManagedCheckout: async () => ({
-      ...nativeManagedCheckout(input.checkoutRoot, input.workspaceRoot),
-    }) as never,
+    resolveManagedCheckout: async (options: { preserveWorkspaceForAuthorityEvaluation?: boolean }) => {
+      if (!options.preserveWorkspaceForAuthorityEvaluation) {
+        const inventoryPath = path.join(input.workspaceRoot, 'workspace_index.json');
+        const inventory = JSON.parse(fs.readFileSync(inventoryPath, 'utf8'));
+        writeJson(inventoryPath, { ...inventory, updated_at: `workspace-ensure-${++workspaceEnsures}` });
+      }
+      return { ...nativeManagedCheckout(input.checkoutRoot, input.workspaceRoot) } as never;
+    },
     compileStageManifest: (() => ({})) as never,
     recordLedger: ((value: Record<string, unknown>) => ({
       ledger_entry: { run_id: value.runId, status: value.status },

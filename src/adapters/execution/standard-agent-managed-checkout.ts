@@ -354,7 +354,7 @@ function nativeRuntimeFromStatus(
 export async function resolveStandardAgentManagedCheckout(input: {
   domainId: string;
   workspaceRoot: string;
-  preserveWorkspaceForQualificationProvisioning?: boolean;
+  preserveWorkspaceForAuthorityEvaluation?: boolean;
   useBoundaryId?: string;
   packageReadiness?: AgentPackageReadinessPort;
   refreshWorkspaceSkills?: WorkspaceSkillProjectionRefresher;
@@ -382,7 +382,7 @@ export async function resolveStandardAgentManagedCheckout(input: {
   const sourcePolicy = packageReadiness.readSourcePolicy?.(packageId) ?? null;
   const nativeRuntime = nativeRuntimeFromStatus(packageStatus, packageId, sourcePolicy);
 
-  const workspaceEnsure = input.preserveWorkspaceForQualificationProvisioning
+  const workspaceEnsure = input.preserveWorkspaceForAuthorityEvaluation
     ? ensureWorkspace(loadFrameworkContracts(), {
         agentId: agent.agent_id,
         workspacePath: requestedWorkspaceRoot,
