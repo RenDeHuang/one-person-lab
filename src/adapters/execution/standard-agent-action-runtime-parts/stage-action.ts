@@ -372,6 +372,17 @@ export async function runStageAction(input: {
   });
   if (beforeLaunch) return await replayStored(beforeLaunch);
 
+  // Stage inputs stay inside the work item; the workspace-level run remains the ledger authority.
+  const stageRequest = input.executionScope?.canonical_work_item_root
+    ? prepareStandardAgentActionRunRequest({
+        workspaceRoot: input.executionScope.canonical_work_item_root,
+        runId: input.runId,
+        domainId: input.domainId,
+        actionId: input.action.action_id,
+        requestBytes: input.requestBytes,
+      }).request
+    : prepared.request;
+
   let launchRpcReturned = false;
   const output: StandardAgentStageActionLaunch = await (async () => {
     try {
@@ -401,11 +412,11 @@ export async function runStageAction(input: {
         '--invocation-mode',
         'invocation',
         '--checkpoint-ref',
-        prepared.request.ref,
+        stageRequest.ref,
         '--input-artifact-ref',
-        prepared.request.ref,
+        stageRequest.ref,
         '--input-artifact-sha256',
-        prepared.request.sha256,
+        stageRequest.sha256,
         '--stage-run-invocation-id',
         stageRunInvocationId,
         '--start',

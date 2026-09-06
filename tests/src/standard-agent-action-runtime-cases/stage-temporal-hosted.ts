@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 import { canonicalJsonBytes } from '../../../src/kernel/canonical-json.ts';
 import { runFamilyRuntime } from '../../../src/adapters/execution/family-runtime.ts';
@@ -347,6 +348,15 @@ test('work-item scoped Stage actions resolve one binding before Temporal and iso
     );
     assert.match(studyA.execution_scope?.inventory_digest ?? '', /^sha256:[a-f0-9]{64}$/u);
     const createCalls = calls.filter((args) => args[0] === 'attempt');
+    for (const [index, args] of createCalls.entries()) {
+      const run: typeof studyA = index === 0 ? studyA : studyB;
+      const inputRef = args[args.indexOf('--input-artifact-ref') + 1]!;
+      assert.ok(inputRef.startsWith(pathToFileURL(`${run.execution_scope!.canonical_work_item_root}/`).href));
+      assert.notEqual(inputRef, run.request.ref);
+      assert.deepEqual(fs.readFileSync(new URL(inputRef)), fs.readFileSync(new URL(run.request.ref)));
+      assert.equal(args[args.indexOf('--input-artifact-sha256') + 1], run.request.sha256);
+      assert.equal(args[args.indexOf('--checkpoint-ref') + 1], inputRef);
+    }
     assert.deepEqual(createCalls.map((args) => args[args.indexOf('--scope-kind') + 1]), [
       'work_item',
       'work_item',
