@@ -389,6 +389,7 @@ function assertOrdinaryLifecycleAuthority(input: ReturnType<typeof currentStanda
   if (!input.contract || !input.lifecycle) return;
   const lifecycle = input.lifecycle.payload;
   const boundary = isRecord(lifecycle.authority_boundary) ? lifecycle.authority_boundary : null;
+  // Research admission does not imply publication/submission permission or a quality verdict.
   const forbidden = [
     'stage_body_authorized',
     'business_action_authorized',

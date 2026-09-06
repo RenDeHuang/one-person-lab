@@ -2,6 +2,7 @@ import {
   assert,
   canonicalJsonBytes,
   fs,
+  fileURLToPath,
   path,
   test,
   digest,
@@ -9,7 +10,9 @@ import {
   inspectStandardAgentActionRunBinding,
   inspectStandardAgentActionRunPlan,
   nativeManagedCheckout,
+  preflightStandardAgentDomainLifecycleAdmission,
   runStandardAgentAction,
+  runStandardAgentHandlerSandbox,
   standardAgentLifecycleInitializationHandlerRunId,
   temporaryRoot,
   writeIdentityOnlyLifecycleWorkspace,
@@ -18,6 +21,49 @@ import {
   writeLifecycleWorkspace,
   writeNativeCarrierDescriptor,
 } from './shared.ts';
+
+test('ordinary research admission is independent of quality and publication permission', () => {
+  const fixtureRoot = temporaryRoot('opl-progress-first-admission-');
+  const checkoutRoot = path.join(fixtureRoot, 'checkout');
+  const workspaceRoot = path.join(fixtureRoot, 'workspace');
+  try {
+    fs.mkdirSync(checkoutRoot, { recursive: true });
+    fs.mkdirSync(workspaceRoot, { recursive: true });
+    writeLifecycleContracts(checkoutRoot);
+    const refs = writeLifecycleWorkspace(workspaceRoot);
+    const catalog = JSON.parse(fs.readFileSync(path.join(checkoutRoot, 'contracts/action_catalog.json'), 'utf8'));
+    const lifecyclePath = fileURLToPath(refs.lifecycle.ref);
+    const lifecycle = JSON.parse(fs.readFileSync(lifecyclePath, 'utf8'));
+    const admit = () => preflightStandardAgentDomainLifecycleAdmission({
+      action: catalog.actions[0], payload: { study_id: 'study-001' },
+      checkoutRoot, workspaceRoot, domainId: 'mas', runId: 'progress-first',
+      originalInvocationSha256: 'a'.repeat(64),
+    });
+    for (const qualityStatus of ['unknown', 'insufficient']) {
+      writeJson(lifecyclePath, {
+        ...lifecycle, lifecycle_state: 'active', quality_status: qualityStatus,
+        authority_boundary: {
+          stage_body_authorized: true, business_action_authorized: true,
+          publication_authorized: false, submission_authorized: false,
+        },
+      });
+      assert.equal(admit().status, 'admitted_by_canonical_active_lifecycle');
+    }
+    for (const restriction of [
+      { qualification_only: true },
+      { business_status: 'qualification_only' },
+      { authority_boundary: { stage_body_authorized: false } },
+      { authority_boundary: { business_action_authorized: false } },
+    ]) {
+      writeJson(lifecyclePath, { ...lifecycle, lifecycle_state: 'active', ...restriction });
+      assert.throws(admit, /cannot authorize an ordinary Stage or business route/u);
+    }
+    writeJson(lifecyclePath, { ...lifecycle, lifecycle_state: 'stopped' });
+    assert.throws(admit, /inactive/u);
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
 
 function stageDependencies(input: {
   checkoutRoot: string;
@@ -69,6 +115,76 @@ function writeWorkspaceRegistryBinding(stateRoot: string, workspaceRoot: string)
     }],
   });
 }
+
+test('real MAS catalog, schemas and sandboxed handler initialize an identity-only study', {
+  skip: !process.env.OPL_REAL_MAS_REPO,
+}, async () => {
+  const checkoutRoot = fs.realpathSync.native(process.env.OPL_REAL_MAS_REPO!);
+  const fixtureRoot = temporaryRoot('opl-mas-initialization-abi-');
+  const workspaceRoot = path.join(fixtureRoot, 'workspace');
+  const stateRoot = path.join(fixtureRoot, 'state');
+  const previousStateRoot = process.env.OPL_STATE_DIR;
+  let handlerCalls = 0;
+  let attemptCalls = 0;
+  try {
+    process.env.OPL_STATE_DIR = stateRoot;
+    fs.mkdirSync(path.join(workspaceRoot, 'studies/study-001'), { recursive: true });
+    writeJson(path.join(workspaceRoot, 'workspace_index.json'), {
+      surface_kind: 'opl_workspace_index', version: 'workspace-index.v1',
+      studies: [{
+        study_id: 'study-001', canonical_study_root: 'studies/study-001',
+        quality_status: 'insufficient',
+      }],
+    });
+    writeWorkspaceRegistryBinding(stateRoot, workspaceRoot);
+    const dependencies = {
+      ...stageDependencies({
+        checkoutRoot, workspaceRoot,
+        runHandler: ((request: Parameters<typeof runStandardAgentHandlerSandbox>[0]) => {
+          handlerCalls += 1;
+          return runStandardAgentHandlerSandbox(request);
+        }) as never,
+        onAttempt: () => { attemptCalls += 1; },
+      }),
+      compileStageManifest: undefined,
+    };
+    const input = {
+      domainId: 'mas', actionId: 'direction_and_route_selection', workspaceRoot,
+      payload: { study_id: 'study-001', user_intent: 'Draft a research question; quality remains unassessed.' },
+      runId: 'real-mas-initialization',
+    };
+    const result = await runStandardAgentAction(input, dependencies);
+    if (result.standard_agent_action_run.execution_kind !== 'stage_binding') {
+      assert.fail('expected a Stage action after real MAS initialization');
+    }
+    assert.equal(result.standard_agent_action_run.domain_lifecycle_admission.status,
+      'admitted_by_current_initialization_receipt');
+    const lifecyclePath = path.join(workspaceRoot, 'studies/study-001/control/lifecycle.json');
+    const lifecycleBytes = fs.readFileSync(lifecyclePath);
+    const lifecycle = JSON.parse(lifecycleBytes.toString('utf8'));
+    assert.equal(lifecycle.lifecycle_state, 'active');
+    assert.equal(lifecycle.generation, 1);
+    assert.equal(lifecycle.submission_ready, false);
+    const inventory = JSON.parse(fs.readFileSync(path.join(workspaceRoot, 'workspace_index.json'), 'utf8'));
+    assert.equal(inventory.studies[0].quality_status, 'insufficient');
+    assert.equal(inventory.studies[0].lifecycle_ref, 'control/lifecycle.json');
+    const receipt = JSON.parse(fs.readFileSync(
+      path.join(workspaceRoot, inventory.studies[0].initialization_receipt_ref), 'utf8',
+    ));
+    assert.equal(receipt.stage_body_authorized, true);
+    assert.equal(receipt.publication_authorized, false);
+    assert.equal(receipt.submission_authorized, false);
+    assert.equal(receipt.quality_verdict_created, false);
+    await runStandardAgentAction(input, dependencies);
+    assert.deepEqual(fs.readFileSync(lifecyclePath), lifecycleBytes);
+    assert.equal(handlerCalls, 1);
+    assert.equal(attemptCalls, 1);
+  } finally {
+    if (previousStateRoot === undefined) delete process.env.OPL_STATE_DIR;
+    else process.env.OPL_STATE_DIR = previousStateRoot;
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
 
 test('identity-only work item is owner-initialized before Stage launch and freezes the post-CAS scope', async () => {
   const fixtureRoot = temporaryRoot('opl-lifecycle-initialization-');

@@ -92,6 +92,25 @@
     "handler_refs_must_resolve_before_launch": true,
     "stage_manifest_must_compile_before_launch": true
   },
+  "domain_lifecycle_admission": {
+    "capability_id": "opl_domain_lifecycle_admission.v1",
+    "identity_only_initialization": {
+      "trigger": "catalog_declared_initialization_and_inventory_item_without_lifecycle_ref",
+      "authority": "installed_domain_internal_handler",
+      "host_role": "bind_original_invocation_and_materialize_exact_domain_authorized_bytes",
+      "same_action_run_continues_after_initialization": true,
+      "existing_lifecycle_is_not_reinitialized": true,
+      "concurrent_inventory_changes_are_not_overwritten": true
+    },
+    "progress_first": {
+      "unknown_or_insufficient_quality_blocks_research_admission": false,
+      "publication_or_submission_permission_required_for_research_admission": false,
+      "research_admission_grants_publication_or_submission_permission": false,
+      "research_admission_implies_quality_pass": false,
+      "qualification_only_or_explicitly_disallowed_research_is_admitted": false,
+      "inactive_lifecycle_requires_domain_reactivation_authority": true
+    }
+  },
   "handler_execution": {
     "host_owner": "runway",
     "supported_bindings": [
