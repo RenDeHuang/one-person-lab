@@ -1,4 +1,5 @@
 import type { CodexExecEvent } from '../codex.ts';
+import stageQualityCycleContract from '../../../../contracts/opl-framework/stage-quality-cycle-contract.json' with { type: 'json' };
 import { FrameworkContractError } from '../../../kernel/contract-validation.ts';
 import { stringValue as optionalString } from '../../../kernel/json-record.ts';
 import { requireFamilyRuntimeExecutionScope } from '../family-runtime-execution-scope.ts';
@@ -28,6 +29,13 @@ export type CodexStageRunnerInput = {
   stagePacketRef?: string | null;
   effectiveStagePrompt?: StandardAgentStagePromptResolution | null;
   effectiveQualityRolePrompt?: ReturnType<typeof readStandardAgentQualityRolePromptFile> | null;
+  effectiveManagedContent?: Array<{
+    purpose: string;
+    ref: string;
+    sha256: string;
+    size_bytes: number;
+    content: string;
+  }>;
   runnerMode?: string | null;
   observedAt?: string | null;
   timeoutMs?: number | null;
@@ -225,6 +233,7 @@ function typedCloseoutScopeBindingLines(attempt: JsonRecord) {
 function qualityAttemptPromptLines(
   attempt: JsonRecord,
   effectiveQualityRolePrompt?: ReturnType<typeof readStandardAgentQualityRolePromptFile> | null,
+  effectiveManagedContent: CodexStageRunnerInput['effectiveManagedContent'] = [],
 ) {
   const attemptRole = optionalString(attempt.attempt_role);
   if (!attemptRole) {
@@ -271,6 +280,16 @@ function qualityAttemptPromptLines(
     'A same-thread write-and-check pass is in_thread_refinement only. It is not formal Stage Review and cannot produce a review receipt.',
     `Quality role prompt ref: ${rolePromptRef ?? 'missing'}`,
     `Quality rubric refs: ${JSON.stringify(qualityRubricRefs)}`,
+    ...effectiveManagedContent.flatMap((entry) => [
+      'OPL immutable managed package content follows. Use these exact bound bytes, not live workspace substitutes.',
+      `Managed content purpose: ${entry.purpose}`,
+      `Managed content ref: ${entry.ref}`,
+      `Managed content SHA-256: ${entry.sha256}`,
+      `Managed content size bytes: ${entry.size_bytes}`,
+      '<opl_managed_content>',
+      entry.content,
+      '</opl_managed_content>',
+    ]),
     ...(rolePrompt
       ? [
           `Quality role prompt SHA-256: ${rolePrompt.sha256}`,
@@ -340,6 +359,10 @@ function qualityAttemptPromptLines(
     ...(attemptRole === 're_reviewer'
       ? [
           'This is finding-closure re-review. Evaluate each prior required finding against the repair_map and exact new artifact.',
+          'Use the exact required field names and enum values in this OPL finding-closure contract for non-hard-stop results; aliases do not replace required fields.',
+          '<opl_finding_closure_contract>',
+          JSON.stringify(stageQualityCycleContract.finding_closure_contract),
+          '</opl_finding_closure_contract>',
           'For a non-hard-stop re_reviewer outcome, required route_impact.stage_quality_cycle fields are outcome, finding_closures, repair_regressions, critical_new_findings, and optional_observations.',
           'For outcome=blocked or outcome=human_gate, return only outcome plus the required hard-stop evidence; do not fabricate a finding-closure result.',
           'Only still-open required findings, repair regressions, or critical new findings may trigger another repair round.',
@@ -361,6 +384,7 @@ export function runnerPromptFor(input: {
   stagePacketRef?: string | null;
   effectiveStagePrompt?: StandardAgentStagePromptResolution | null;
   effectiveQualityRolePrompt?: ReturnType<typeof readStandardAgentQualityRolePromptFile> | null;
+  effectiveManagedContent?: CodexStageRunnerInput['effectiveManagedContent'];
 }) {
   const stageId = stageIdFromAttempt(input.attempt);
   const attemptId = optionalString(input.attempt.stage_attempt_id) ?? 'unknown-attempt';
@@ -374,7 +398,7 @@ export function runnerPromptFor(input: {
       ? 'Use the domain-owned stage packet as input within the stage skill boundary.'
       : 'No stage packet was supplied. Start from the declared stage id, hydrated stage prompt, workspace context, and any readable prior artifacts; record the missing packet as quality debt rather than stopping.',
     'Return progress through structured events when available.',
-    ...qualityAttemptPromptLines(input.attempt, input.effectiveQualityRolePrompt),
+    ...qualityAttemptPromptLines(input.attempt, input.effectiveQualityRolePrompt, input.effectiveManagedContent),
     ...sourceTruthPromptLines(input.attempt),
     ...effectiveStagePromptLines(input),
     ...providerAuthorizationPromptLines(input),
