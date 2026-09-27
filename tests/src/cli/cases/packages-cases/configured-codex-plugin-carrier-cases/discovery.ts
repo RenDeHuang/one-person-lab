@@ -275,7 +275,6 @@ process.stdout.write(JSON.stringify({ installed: [], available: [] }));
     for (const packageId of [
       'opl-channel-weixin',
       'opl-fleet-agent',
-      'opl-link-desktop-connector',
     ]) {
       assert.equal(entries.some((entry: any) => entry.package_id === packageId), true, packageId);
     }

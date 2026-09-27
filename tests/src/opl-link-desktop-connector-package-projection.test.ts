@@ -103,15 +103,7 @@ test('dynamic package discovery admits one remote companion Host contribution an
   assert.deepEqual(normalized.capability_provider?.module_export_ids, [
     'opl.link.remote-companion.connector.v1',
   ]);
-  assert.equal(normalized.app_contributions?.views[0]?.view_type, 'remote_companion_access');
-  assert.deepEqual(normalized.app_contributions?.views[0]?.command_ids, [
-    'pair-start',
-    'pair-refresh',
-    'pair-confirm',
-    'pair-cancel',
-    'device-rename',
-    'pair-revoke',
-  ]);
+  assert.equal(normalized.app_contributions, null);
 
   const integration = resolvePackageHostIntegration(hostManifest);
   assert.equal(integration.integration_kind, 'capability_provider');
@@ -130,14 +122,10 @@ test('dynamic package discovery admits one remote companion Host contribution an
     [manifest.package_id]: {
       presence: { installed: true },
       capability_exposure: { status: 'enabled' },
-      app_contributions: manifest.app_contributions,
     },
   }, { actionRoute: 'opl.connect.remote-companion-connector-host' });
-  assert.equal(available.contribution_count, 1);
-  assert.equal(available.slots['settings.section'].length, 1);
-  assert.equal(available.entries[0]?.package_id, manifest.package_id);
-  assert.equal(available.entries[0]?.view?.view_type, 'remote_companion_access');
-  assert.equal(available.entries[0]?.action_boundary, 'opl.connect.remote-companion-connector-host');
+  assert.equal(available.contribution_count, 0);
+  assert.deepEqual(available.slots['settings.section'], []);
 
   const missing = buildAppUiContributionsProjection({});
   assert.equal(missing.contribution_count, 0);
