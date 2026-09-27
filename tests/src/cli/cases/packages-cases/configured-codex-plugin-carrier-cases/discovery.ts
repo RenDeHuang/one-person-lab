@@ -260,7 +260,8 @@ process.stdout.write(JSON.stringify({ installed: [], available: [] }));
     const expectedPackageIds = listCurrentPackageProjections()
       .flatMap((projection) => {
         const manifest = normalizePackageManifest(projection.payload, projection.source_ref);
-        return manifest.configured_codex_plugin_carrier
+        return projection.payload.publication_channel_admission !== 'development_only'
+          && manifest.configured_codex_plugin_carrier
           && !(manifest.package_role === 'capability_package'
             && manifest.codex_default_exposure === false
             && manifest.codex_interaction_mode === 'headless_internal'
@@ -275,7 +276,6 @@ process.stdout.write(JSON.stringify({ installed: [], available: [] }));
     for (const packageId of [
       'opl-channel-weixin',
       'opl-fleet-agent',
-      'opl-link-desktop-connector',
     ]) {
       assert.equal(entries.some((entry: any) => entry.package_id === packageId), true, packageId);
     }
