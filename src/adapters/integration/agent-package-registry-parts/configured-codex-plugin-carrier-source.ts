@@ -37,6 +37,93 @@ function download(url: string, env: NodeJS.ProcessEnv, token?: string) {
   return result.stdout;
 }
 
+function developerCheckoutRoot(packageId: string, owner: Record<string, unknown>, env: NodeJS.ProcessEnv) {
+  if (env.OPL_MODULE_SOURCE_MODE?.trim() !== 'git_checkout') return null;
+  const repo = stringValue(owner.source_repo);
+  if (!repo) return null;
+  let repoName: string;
+  try {
+    repoName = path.basename(new URL(repo).pathname.replace(/\/$/, '').replace(/\.git$/, ''));
+  } catch {
+    return null;
+  }
+  const envKeys = new Set([
+    `OPL_MODULE_PATH_${packageId.replace(/[^A-Za-z0-9]/g, '').toUpperCase()}`,
+    `OPL_MODULE_PATH_${repoName.replace(/[^A-Za-z0-9]/g, '').toUpperCase()}`,
+    ...(packageId === 'mas' ? ['OPL_MODULE_PATH_MEDAUTOSCIENCE'] : []),
+    ...(packageId === 'mas-scholar-skills'
+      ? ['OPL_MODULE_PATH_SCHOLARSKILLS', 'OPL_MODULE_PATH_MAS_SCHOLAR_SKILLS', 'OPL_MAS_SCHOLAR_SKILLS_REPO_ROOT']
+      : []),
+  ]);
+  for (const key of envKeys) {
+    const candidate = stringValue(env[key]);
+    if (!candidate) continue;
+    const resolved = path.resolve(candidate);
+    if (fs.existsSync(path.join(resolved, 'opl-package.json'))
+      && fs.existsSync(path.join(resolved, '.agents', 'plugins', 'marketplace.json'))) {
+      return resolved;
+    }
+  }
+  return null;
+}
+
+function acquireDeveloperCheckoutSource(input: {
+  packageId: string;
+  ownerManifest: Record<string, unknown>;
+  payload: Record<string, unknown>;
+  env: NodeJS.ProcessEnv;
+}) {
+  const sourceRoot = developerCheckoutRoot(input.packageId, input.ownerManifest, input.env);
+  if (!sourceRoot) return null;
+  const surface = isRecord(input.ownerManifest.codex_surface) ? input.ownerManifest.codex_surface : null;
+  const carrier = isRecord(surface?.configured_codex_plugin_carrier)
+    ? surface.configured_codex_plugin_carrier : null;
+  const pluginId = stringValue(carrier?.plugin_selector)?.split('@')[0]
+    ?? stringValue(surface?.plugin_id);
+  const ownerDescriptor = path.join(sourceRoot, 'opl-package.json');
+  const ownerBytes = fs.readFileSync(ownerDescriptor);
+  const sourceOwner = json(ownerBytes);
+  if (sourceOwner.package_id !== input.packageId
+    || sourceOwner.version !== input.ownerManifest.version
+    || (pluginId && isRecord(sourceOwner.codex_surface)
+      && sourceOwner.codex_surface.plugin_id !== pluginId)) {
+    return invalid('Developer checkout does not match the selected Package owner.');
+  }
+  const sourceCommit = stringValue(input.payload.source_commit)
+    ?? stringValue(surface?.carrier_source_commit);
+  if (!sourceCommit || !/^[0-9a-f]{40}$/.test(sourceCommit)) {
+    return invalid('Developer checkout source commit is missing or invalid.');
+  }
+  return {
+    sourceRoot,
+    provenance: {
+      source: sourceRoot,
+      source_type: 'developer_git_checkout',
+      source_commit: sourceCommit,
+    },
+    cleanup: () => {},
+    pathFor: (url: URL) => {
+      if (url.protocol !== 'https:' || url.hostname !== 'raw.githubusercontent.com') {
+        return invalid('Developer checkout carrier file source is invalid.');
+      }
+      const expectedPrefix = `${new URL(String(input.ownerManifest.source_repo)).pathname.replace(/\.git$/, '')}/${sourceCommit}/`;
+      if (!url.pathname.startsWith(expectedPrefix)) {
+        return invalid('Developer checkout carrier file does not belong to the selected commit.');
+      }
+      const relative = decodeURIComponent(url.pathname.slice(expectedPrefix.length));
+      const candidate = path.resolve(sourceRoot, ...relative.split('/'));
+      if (candidate !== sourceRoot && !candidate.startsWith(`${sourceRoot}${path.sep}`)) {
+        return invalid('Developer checkout carrier file escapes its source root.');
+      }
+      const stat = fs.lstatSync(candidate, { throwIfNoEntry: false });
+      if (!stat?.isFile() || stat.isSymbolicLink()) {
+        return invalid('Developer checkout carrier file is missing.');
+      }
+      return fs.readFileSync(candidate);
+    },
+  };
+}
+
 function json(bytes: Buffer) {
   const value = parseJsonText(bytes.toString('utf8'));
   return isRecord(value) ? value : invalid('Package artifact must contain a JSON object.');
@@ -49,6 +136,8 @@ export function acquireHostedPackageSource(input: {
   env: NodeJS.ProcessEnv;
 }) {
   const owner = input.ownerManifest;
+  const developerSource = acquireDeveloperCheckoutSource(input);
+  if (developerSource) return developerSource;
   // Capability/Profile payloads keep their existing transport and lifetime.
   if (owner.surface_kind !== 'opl_agent_package_manifest.v1') return null;
   const surface = isRecord(owner.codex_surface) ? owner.codex_surface : null;
