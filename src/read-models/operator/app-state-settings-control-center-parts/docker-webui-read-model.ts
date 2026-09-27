@@ -83,7 +83,8 @@ export function buildDockerWebuiSettingsReadModel(
     source_ref: 'app_state.settings_control_center.action_catalog + app_state.core.codex',
     doctor_surface: 'opl system docker-webui doctor --json',
     doctor_read_model_ref: 'docker_webui_doctor',
-    ordinary_status: codexAccess.model_access_ready ? 'action_available' : 'attention_needed',
+    // Model credentials do not establish whether a separate WebUI deployment exists.
+    ordinary_status: 'not_checked',
     one_click_install: settingsTaskRef(taskEntries, 'settings_install_docker_webui'),
     api_key_configuration: {
       ...settingsTaskRef(taskEntries, 'settings_configure_webui_api_key'),

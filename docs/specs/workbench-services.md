@@ -48,3 +48,7 @@ Studio `scripts/acceptance/workbench-services.mjs`。源码通过不等于已发
 包及 Studio 安装包具备此功能；分发时必须绑定两端实际字节并重新验收。
 
 部分 Temporal 服务接受但不执行 Schedule conflict token 校验。因此同一任务的管理操作使用固定 workflow ID，禁止活动执行重复启动；revision 在该执行内复核，不能仅依赖 token 宣称并发安全。
+
+## 代码模块
+
+插件入口和预检查确认仍由 `index.ts` 聚合。`tasks.ts` 持有计划任务，`memory.ts` 持有只读记忆及纠错笔记，`storage.ts` 持有用量、清理预览和执行；路径校验与文件身份检查共用于 `resource-files.ts`。`resources.ts` 仅保留兼容调用门面，不复制实现或状态。对外仍是一个 Workbench Services 插件与原有 state/action 合同。

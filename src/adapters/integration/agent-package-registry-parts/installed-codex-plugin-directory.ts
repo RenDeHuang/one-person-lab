@@ -819,7 +819,10 @@ export function discoverAvailablePackageDescriptors(input: {
   runner?: CodexPluginCommandRunner;
 } = {}) {
   const discovered = discoverCurrentOwnerPackageDescriptors(input);
+  const developmentOnly = new Set(listCurrentPackageProjections().filter(({ payload }) => payload.publication_channel_admission === 'development_only').map(({ payload }) => payload.package_id));
+  for (const packageId of developmentOnly) if (typeof packageId === 'string' && input.packageId !== packageId) discovered.delete(packageId);
   for (const [packageId, descriptor] of discoverPackageDescriptors({ ...input, includeAvailable: true })) {
+    if (!descriptor.readiness.installed && developmentOnly.has(packageId) && input.packageId !== packageId) continue;
     discovered.set(packageId, descriptor.readiness.installed
       ? withCurrentOwnerProjection(descriptor, discovered.get(packageId))
       : descriptor);

@@ -42,7 +42,22 @@
       "en-US": "Plan evidence-based medical education videos, direct their stories, review audiovisual quality, and curate reusable keyframes.",
       "zh-CN": "规划循证医学科普视频，设计叙事与镜头，复核视听质量并整理可复用关键帧。"
     },
-    "home_shortcuts": []
+    "home_shortcuts": [
+      {
+        "shortcut_id": "open_medical_video_workflow",
+        "label_i18n": {
+          "zh-CN": "开展医学科普视频工作",
+          "en-US": "Open Med Auto Cast workflow"
+        },
+        "default_visible": true,
+        "user_configurable": true,
+        "route": {
+          "route_kind": "agent_package_shortcut",
+          "executor": "codex_cli",
+          "codex_visible_entry": "med-autocast"
+        }
+      }
+    ]
   },
   "publication_projection_order": 60,
   "publication_source": {

@@ -8,6 +8,7 @@ import { isRecord } from '../../../kernel/contract-validation.ts';
 import {
   FRAMEWORK_CAPABILITY_PACKAGE_MEMBERSHIP,
   loadStandardAgentRegistry,
+  listCurrentPackageProjections,
   resolveStandardAgent,
   STANDARD_AGENT_SERIES_MEMBERSHIP,
 } from '../../../kernel/standard-agent-registry.ts';
@@ -104,7 +105,8 @@ const NO_AUTHORITY = {
 } as const;
 
 export function buildCodexFamilyPluginSpecs(packageDirectory?: string): CodexFamilyPluginSpec[] {
-  return loadStandardAgentRegistry(packageDirectory).map((entry) => {
+  const excluded = new Set(listCurrentPackageProjections(packageDirectory).filter(({ payload }) => payload.publication_channel_admission === 'development_only').map(({ payload }) => payload.package_id));
+  return loadStandardAgentRegistry(packageDirectory).filter(entry => !excluded.has(entry.agent_id)).map((entry) => {
     const capabilityPackage = entry.series_membership === FRAMEWORK_CAPABILITY_PACKAGE_MEMBERSHIP;
     return {
       module_id: capabilityPackage ? null : entry.module_id.toLowerCase(),

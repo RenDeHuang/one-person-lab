@@ -823,7 +823,7 @@ export const SETTINGS_CONTROL_CENTER_ACTIONS: SettingsAction[] = [
   {
     action_id: 'settings_install_docker_webui',
     stable_id: 'install_docker_webui',
-    label: 'Install Docker WebUI',
+    label: 'Initialize Framework in a deployed WebUI',
     section_id: 'docker_webui',
     task_kind: 'apply',
     taxonomy: 'settings.docker_webui.install',
@@ -833,7 +833,7 @@ export const SETTINGS_CONTROL_CENTER_ACTIONS: SettingsAction[] = [
     dry_run_supported: true,
     confirmation_required: true,
     danger_level: 'medium',
-    impact: 'Runs the existing OPL install route for Codex, provider profile, modules, skills, and GUI/WebUI entrypoints without defining WebUI release truth.',
+    impact: 'Initializes Framework in the current environment. Does not deploy a WebUI server, pull an image, create a container, or configure browser authentication; use the Studio deployment installer first.',
     follow_up_action_ids: ['settings_configure_webui_api_key', 'settings_run_webui_startup_maintenance', 'settings_diagnose_docker_webui'],
     verify_action_id: 'settings_diagnose_docker_webui',
   },

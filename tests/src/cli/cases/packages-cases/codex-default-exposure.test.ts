@@ -73,3 +73,16 @@ test('internal OPL carriers stay headless while interactive Packages remain sele
     assert.equal(normalized.codex_interaction_mode, expectedMode, packageId);
   }
 });
+
+test('development-only connectors stay discoverable explicitly but are excluded from default registration', async () => {
+  const { buildCodexFamilyPluginSpecs } = await import('../../../../../src/adapters/integration/system-installation/codex-plugin-registry.ts');
+  const { getOplPackageSpecs, getPublicationAdmittedOplPackageSpecs } = await import('../../../../../src/adapters/integration/package-distribution.ts');
+  const development = getOplPackageSpecs().filter(spec => spec.publication_channel_admission === 'development_only');
+  assert.ok(development.some(spec => spec.package_id === 'opl-link-desktop-connector'));
+  for (const spec of development) {
+    assert.equal(buildCodexFamilyPluginSpecs().some(item => item.pack_id === spec.module_id), false);
+    assert.equal(getPublicationAdmittedOplPackageSpecs().some(item => item.package_id === spec.package_id), false);
+  }
+  const descriptor = JSON.parse(fs.readFileSync('contracts/opl-framework/packages/opl-link-desktop-connector.json', 'utf8'));
+  assert.equal(descriptor.app_contributions, undefined);
+});

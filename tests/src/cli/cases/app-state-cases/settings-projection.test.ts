@@ -1,4 +1,5 @@
 import { buildSettingsControlCenter } from '../../../../../src/read-models/operator/app-state-settings-control-center.ts';
+import { buildDockerWebuiSettingsReadModel } from '../../../../../src/read-models/operator/app-state-settings-control-center-parts/docker-webui-read-model.ts';
 import { assert, createFakeCodexFixture, fs, os, path, repoRoot, runCli, test } from '../../helpers.ts';
 
 const ORDINARY_SETTINGS_SECTIONS = [
@@ -13,6 +14,12 @@ const ORDINARY_SETTINGS_SECTIONS = [
   'storage',
   'preferences',
 ];
+
+test('ordinary WebUI projection does not infer deployment from model access', () => {
+  for (const codex of [{}, { installed: true, api_key_present: true, opl_gateway_configured: true }]) {
+    assert.equal(buildDockerWebuiSettingsReadModel({ core: { codex } }, [], []).ordinary_status, 'not_checked');
+  }
+});
 
 const ORDINARY_SETTINGS_ROUTES = [
   'general',
