@@ -81,11 +81,9 @@ function normalizeDomainOutput(value: unknown, closeoutRefs: string[]): TypedSta
       { output_ref: outputRef },
     );
   }
-  // Extra fields beyond the refs-only identity (supporting refs, prose, summaries)
-  // are transport noise: they are dropped here, never forwarded. Rejecting the
-  // whole packet over them discards a fully routed closeout and degrades a
-  // finished Stage to a raw progress envelope, which contradicts the
-  // progress-over-abort policy for finished executor work.
+  // Extra fields beyond the refs-only identity are transport noise: they are
+  // dropped here and never forwarded, while the identity-valid closeout stays
+  // usable for progress-first recovery.
   return {
     surface_kind: surfaceKind,
     version,

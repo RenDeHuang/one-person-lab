@@ -90,9 +90,9 @@ test('Temporal Codex activity rejects object closeout refs carrying nested body 
   }), null);
 });
 
-test('Temporal Codex activity rejects inline domain output payloads', () => {
+test('Temporal Codex activity strips inline domain output payloads', () => {
   const outputRef = 'file:///tmp/redcube-runtime/artifacts/closeout.json';
-  assert.equal(compactCloseoutPacketForTemporalResult({
+  const compacted = compactCloseoutPacketForTemporalResult({
     surface_kind: 'stage_attempt_closeout_packet',
     closeout_refs: [outputRef],
     domain_output: {
@@ -102,7 +102,15 @@ test('Temporal Codex activity rejects inline domain output payloads', () => {
       output_ref: outputRef,
       payload: { artifact_body: 'must-not-enter-temporal' },
     },
-  }), null);
+  });
+  assert.ok(compacted);
+  assert.deepEqual(compacted.domain_output, {
+    surface_kind: 'domain_owned_stage_output_ref',
+    version: 'domain-owned-stage-output-ref.v1',
+    domain_id: 'redcube',
+    output_ref: outputRef,
+  });
+  assert.equal(JSON.stringify(compacted).includes('must-not-enter-temporal'), false);
 });
 
 test('Temporal closeout history drops recommendation-only reason from a decisive route', () => {
