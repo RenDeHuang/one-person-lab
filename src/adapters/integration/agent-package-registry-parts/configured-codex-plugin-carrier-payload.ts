@@ -145,7 +145,7 @@ function runPayloadCurl(input: {
   return runConfiguredDownloadWithTransientRetry(() => {
     const result = spawnSync(curl, [
       '--fail', '--silent', '--show-error', '--location',
-      '--proto', '=https', '--tlsv1.2',
+      '--proto', '=https', '--tlsv1.2', '--ipv4',
       '--connect-timeout', '10', '--max-time', String(input.maxTimeSeconds),
       input.url,
       ...(input.outputPath ? ['--output', input.outputPath] : []),

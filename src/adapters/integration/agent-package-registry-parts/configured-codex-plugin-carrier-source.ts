@@ -21,6 +21,7 @@ function download(url: string, env: NodeJS.ProcessEnv, token?: string) {
   const result = runConfiguredDownloadWithTransientRetry(() => {
     const response = spawnSync('curl', [
       '--fail', '--silent', '--show-error', '--location', '--proto', '=https',
+      '--ipv4',
       '--connect-timeout', '10', '--max-time', '120', '--max-filesize', String(MAX_BYTES),
       ...(token ? ['-H', `Authorization: Bearer ${token}`] : []),
       '-H', 'Accept: application/vnd.oci.image.manifest.v1+json', url,
