@@ -92,13 +92,18 @@ OPL Framework 负责组织和运行能力，确保任务可以可靠启动、持
 两者采用一致的可组合设计，但承担不同责任：Framework 保证能力真实可用，App 保证用户看到的是
 一套稳定产品。运行底座和界面因此可以独立演进，同时共享同一份任务、状态和操作事实。
 
+Framework Host 负责通用运行、Package 能力图和 App 投影；Studio 的 DSH/Cordis Application Host
+负责自己的 profile、插件、原生 Codex 和交付 transport。两者通过公开合同协作，各自保留清楚范围。
+具体分工由 [Framework 架构](https://github.com/gaofeng21cn/one-person-lab/blob/main/docs/architecture.md#host-scope-boundary) 和 [App adapter contract](https://github.com/gaofeng21cn/one-person-lab-app/blob/main/contracts/app-shell-adapter.json) 维护。
+
 ## 界面持续演进，产品体验保持连续
 
 One Person Lab App 对外提供一套统一的任务、能力、文件、状态和操作体验。界面设计可以持续改进，
-但用户不会因此进入两套产品，也不需要重新建立工作、迁移能力或学习相互冲突的操作方式。
+App 负责定义升级时的身份、数据保留、能力和更新路径，让用户能够从已有工作继续。
 
-只有经过完整兼容性、安装、安全和发布验证的界面才会进入正式产品。内部实现如何演进，不改变用户
-已有工作的连续性，也不改变产品对状态、操作和结果的承诺。
+正式版本发布、首次安装、旧版升级和 Preview 到 Stable 的终端 handoff 分别需要自己的证据。
+Framework source 与聚合状态不能替代这些验收；支持路径和当前证据由 [App 发布合同](https://github.com/gaofeng21cn/one-person-lab-app/blob/main/contracts/app-release-channel.json)
+和 [App 当前状态](https://github.com/gaofeng21cn/one-person-lab-app/blob/main/docs/status.md) 维护。
 
 ## 自进化：围绕能力持续改进
 

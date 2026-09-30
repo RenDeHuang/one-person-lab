@@ -99,12 +99,14 @@ Users only need four stable product concepts:
 | **OPL Packages** | Installable Agents, Skills, Tools, Plugins, and Workflows that add professional capability. | Each Package owner owns identity and publication; Framework discovers and projects installed capabilities. |
 | **OPL Cloud** | Online Workspace, account governance, hosted resources, collaboration, and Agent services. | `one-person-lab-cloud` owns Cloud products and services; the product is in active implementation and delivery. |
 
-Foundry Agents such as MAS, MAG, RCA, OMA, and Book Forge are professional
+Foundry Agents, for example MAS, MAG, RCA, OMA, and Book Forge, are professional
 authority domains delivered through OPL Packages. They keep their own quality,
 artifact, and delivery decisions; they are not a fifth product layer and are not
 Framework plugins by definition.
 
-The Studio implementation may run a separate DeepSeek Harness/Cordis
+The App-selected [`opl-studio`](https://github.com/gaofeng21cn/opl-studio)
+implementation provides the current Desktop, WebUI, and Docker build sources.
+It runs a separate DeepSeek Harness/Cordis
 Application Host for its profile, plugin lifecycle, native Codex backend, and
 delivery transports. It consumes Framework/App public contracts and does not
 create another OPL runtime, Package registry/currentness authority, App
@@ -120,11 +122,13 @@ governance, hosted resources, collaboration, and Agent services of OPL Cloud.
 
 For the complete repository split, see the [OPL family repository map](./docs/public/repo-map.md).
 
-The desktop product follows the Codex App interaction shape and presents MAS, MAG, RCA, and later Foundry Agents as built-in task entries. Users do not need to choose the underlying executor or shell implementation; those details stay in developer diagnostics and verification material.
+The desktop product follows the Codex App interaction shape. Its Agent and capability entries come from installed Package descriptors and Framework projections, so the available work follows the capabilities actually installed. Users choose the capability needed for their work; runtime and carrier details are available in developer diagnostics.
 
-## Current Product Lines
+## Product Line Examples
 
-| Product line | Current agent | Best for | Typical deliverables |
+The examples below show how professional responsibility is divided. They are not an exhaustive Package list or an installation profile; each owner maintains its capability description, and installed availability comes from Framework discovery.
+
+| Product line | Agent example | Best for | Typical deliverables |
 | --- | --- | --- | --- |
 | `Agent Foundry` | [`OPL Meta Agent`](https://github.com/gaofeng21cn/opl-meta-agent) | Turning create, takeover, and improve intent into agent design and evidence-grounded evolution semantics through `engineer-agent` | `AgentBlueprint`, `EvalSpec`, `EvolutionProposal` |
 | `Research Foundry` | [`Med Auto Science`](https://github.com/gaofeng21cn/med-autoscience) | Medical research, evidence organization, analysis, manuscript preparation | Analysis packages, evidence packages, manuscripts |
@@ -138,13 +142,13 @@ To use the desktop product, download One Person Lab App from the App repository:
 
 [Download One Person Lab App](https://github.com/gaofeng21cn/one-person-lab-app/releases/latest)
 
-The desktop product one-shot installer, complete first-install package, Docker/WebUI entry point, GitHub Releases, and user tutorials are maintained by the App repository. This repository maintains the CLI, initialization flow, runtime, contracts, module management, and machine-readable App interfaces behind those entries.
+The desktop product one-shot installer, complete first-install package, Docker/WebUI entry point, GitHub Releases, and user tutorials are maintained by the App repository. This repository maintains the CLI, initialization flow, runtime, contracts, Package discovery, and machine-readable App interfaces behind those entries.
 
 To develop a new domain agent, debug the CLI, or integrate runtime surfaces, open the technical entry below.
 
 ## For Codex / Agents
 
-On a new machine, ask Codex to install the OPL runtime, MAS/MAG/RCA/Book Forge/OMA agent surfaces, OPL Flow (including its bundled `$software-development` documentation-governance workflow), and companion tools from the [new-machine Codex bootstrap guide](docs/references/current-support/opl-new-machine-codex-bootstrap.md):
+On a new machine, ask Codex to install OPL Base, the Packages needed for your work, OPL Flow (including its bundled `$software-development` documentation-governance workflow), and companion tools from the [new-machine Codex bootstrap guide](docs/references/current-support/opl-new-machine-codex-bootstrap.md). The App profile, user choices, and native carrier readback determine the installed Package set:
 
 ```text
 Please follow the official One Person Lab new-machine guide and set up this machine with the OPL agent runtime environment and the complete Codex workflow toolkit.
@@ -174,8 +178,9 @@ Common framework commands:
 
 ```bash
 opl help --text
+opl app state --profile fast --json
+opl packages status --json
 opl connect modules
-opl connect exec --module medautoscience -- doctor entry-modes
 opl connect sync-skills
 opl family-runtime status
 opl family-runtime repair

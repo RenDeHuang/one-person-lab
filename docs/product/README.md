@@ -2,6 +2,8 @@
 
 本目录只描述 Framework 暴露给 App/用户界面的产品边界。页面结构、交互、shell 选择和 release truth 归 `one-person-lab-app`。
 
+当前 Shell 实现与仓库角色见 [仓库地图](../public/repo-map.md#产品-owners)；Host 范围见 [架构](../architecture.md#host-scope-boundary)。App 入口由 installed descriptor 与 Framework projection 提供，starter profile 只选择安装组合。
+
 ## Framework 提供
 
 - `app state` 与 `app action` machine surface；

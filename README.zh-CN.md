@@ -103,8 +103,9 @@ MAS、MAG、RCA、OMA、Book Forge 等 Foundry Agents 是通过 OPL Packages 交
 authority domain。它们继续持有自己的质量、产物与交付判断；它们不是第五个产品层，
 也不因为被 Framework 托管就天然等于 Cordis plugin。
 
-Studio 实现可以为 DSH profile、插件生命周期、原生 Codex 后端和 delivery transport
-运行独立的 DeepSeek Harness/Cordis Application Host。它只消费 Framework/App 公开
+App 选择的 [`opl-studio`](https://github.com/gaofeng21cn/opl-studio) 实现提供当前 Desktop、
+WebUI 和 Docker 的构建来源。它为 DSH profile、插件生命周期、原生 Codex 后端和
+delivery transport 运行独立的 DeepSeek Harness/Cordis Application Host。它只消费 Framework/App 公开
 合同，不创建第二套 OPL runtime、Package registry/currentness、App state/action、产品
 或发布 authority。机器边界见
 [`cordis-architecture-profile.json`](./contracts/opl-framework/cordis-architecture-profile.json)。
@@ -115,11 +116,13 @@ Base/Framework，`one-person-lab-app` 维护 App 产品与发布体验，各 Pac
 
 完整仓库分工见 [OPL 系列仓库地图](./docs/public/repo-map.md)。
 
-桌面产品沿用 Codex App 的交互形态，把 MAS、MAG、RCA 及后续 Foundry Agents 呈现为内置任务入口。普通用户不需要选择底层执行器或界面实现；这些细节只出现在开发者诊断和验证材料里。
+桌面产品沿用 Codex App 的交互形态。Agent 和能力入口来自已安装 Package 的 descriptor 与 Framework 投影，可选工作随实际安装的能力变化。用户围绕自己的工作选择能力；运行时和 carrier 细节可在开发者诊断中查看。
 
-## 当前产品线
+## 产品线示例
 
-| 产品线 | 当前智能体 | 适合的工作 | 典型交付物 |
+以下示例说明不同专业工作的责任分工，不是完整 Package 名单或安装 profile。能力说明由各 owner 维护，安装后的可用入口由 Framework 动态发现。
+
+| 产品线 | 智能体示例 | 适合的工作 | 典型交付物 |
 | --- | --- | --- | --- |
 | 智能体工坊 | [`OPL Meta Agent`](https://github.com/gaofeng21cn/opl-meta-agent) | 通过 `engineer-agent` 把新建、接管和改进意图转成智能体设计与证据驱动演进语义 | `AgentBlueprint`、`EvalSpec`、`EvolutionProposal` |
 | 研究工坊 | [`Med Auto Science`](https://github.com/gaofeng21cn/med-autoscience) | 医学研究、证据整理、数据分析、稿件准备 | 分析包、证据包、稿件 |
@@ -133,13 +136,13 @@ Base/Framework，`one-person-lab-app` 维护 App 产品与发布体验，各 Pac
 
 [下载 One Person Lab App](https://github.com/gaofeng21cn/one-person-lab-app/releases/latest)
 
-桌面产品的一键安装、完整首次安装包、Docker/WebUI 入口、GitHub Release 和用户教程由 App 仓维护。本仓维护这些入口背后的命令行、初始化流程、运行时、合同、模块管理和 App 可消费机器接口。
+桌面产品的一键安装、完整首次安装包、Docker/WebUI 入口、GitHub Release 和用户教程由 App 仓维护。本仓维护这些入口背后的命令行、初始化流程、运行时、合同、Package 发现和 App 可消费机器接口。
 
 开发新的领域智能体、调试命令行或接入运行时，请展开下方技术入口。
 
 ## 给 Codex / Agent
 
-在新机器上，让 Codex 按 [新机器 Codex 全家桶安装入口](docs/references/current-support/opl-new-machine-codex-bootstrap.md) 自动安装配置 OPL runtime、MAS/MAG/RCA/OMA/Book Forge 智能体可见面、包含 `$software-development` 文档治理工作流的 OPL Flow 和推荐 companion tools：
+在新机器上，让 Codex 按 [新机器 Codex 全家桶安装入口](docs/references/current-support/opl-new-machine-codex-bootstrap.md) 安装配置 OPL Base、工作所需的 Packages、包含 `$software-development` 文档治理工作流的 OPL Flow 和推荐 companion tools。实际 Package 集合由 App profile、用户选择和 native carrier 回读决定：
 
 ```text
 请按 One Person Lab 官方新机器指南，帮我完成这台机器的 OPL 智能体运行环境和 Codex 工作流全家桶安装配置。
@@ -168,8 +171,9 @@ npm link
 
 ```bash
 opl help --text
+opl app state --profile fast --json
+opl packages status --json
 opl connect modules
-opl connect exec --module medautoscience -- doctor entry-modes
 opl connect sync-skills
 opl family-runtime status
 opl family-runtime repair

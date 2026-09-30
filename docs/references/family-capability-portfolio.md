@@ -1,6 +1,6 @@
 # OPL Family Capability Portfolio
 
-本文把 `contracts/opl-framework/family-capability-domain-registry.json` 转为人读认知地图。contract 是字段和成员的唯一 machine owner；本文不维护安装状态、成熟度、测试计数或 release 状态。
+本文把 [`family-capability-domain-registry.json`](../../contracts/opl-framework/family-capability-domain-registry.json) 转为人读认知地图。contract 持有能力域的字段和标签，不定义已安装 Package 或 Agent 成员；本文不维护安装状态、成熟度、测试计数或 release 状态。四层产品定位见 [项目概览](../project.md#产品分层)。
 
 ## 读法
 
@@ -10,7 +10,7 @@ capability domain 是用户和产品理解 OPL 能力的标签，不是源码目
 | --- | --- | --- | --- |
 | `policy` | Charter | 产品与运行边界 | Framework contracts、App profile、Cloud policy |
 | `workspace` | Workspace | 工作材料、绑定与恢复位置 | Framework workspace、file carrier、Cloud workspace |
-| `catalog-discovery` | Atlas | 发现可用 Agent 与 capability | owner descriptors、domain manifests、App catalog |
+| `catalog-discovery` | Atlas | 发现可用 Agent 与 capability | installed owner descriptors、Framework discovery/projection |
 | `package-platform` | Pack | 安装单元、descriptor 与 carrier ABI | Package owner、native carrier、Framework adapter |
 | `stage-policy` | Stagecraft | Stage 边界、上下文与责任 | stage contracts、domain quality owner |
 | `execution` | Runway | executor、provider 与 Attempt 运行 | Temporal history、Attempt ledger、executor route |
@@ -36,7 +36,7 @@ capability domain 是用户和产品理解 OPL 能力的标签，不是源码目
 
 Framework source unit 由 `contracts/opl-framework/source-module-map.json` 维护；当前 Cordis profiles 为 `base-headless`、`app-full` 和 `foundry-dev`。`contracts/opl-framework/brand-module-registry.json` 和相关 CLI 只提供 Framework surface projection，不能冻结整个 Family 的 domain 数量或 owner。
 
-Fabric 的实现和 publication 主要属于 Cloud，不要求 Framework 创建对称模块。App 的 Client contribution 也由 App product owner 持有。
+Fabric 的实现和 publication 主要属于 Cloud，不要求 Framework 创建对称模块。App 的 Client contribution 也由 App product owner 持有。专业 Agent 的品牌或产品线示例同样不决定源码目录、Package 清单或 Host profile；入口来自 installed descriptor 与 Framework projection。
 
 拓扑晋升条件由 [Package 拓扑](../project.md#package-拓扑) 统一定义。
 

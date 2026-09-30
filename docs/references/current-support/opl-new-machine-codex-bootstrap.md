@@ -1,6 +1,6 @@
 # OPL 新机器安装
 
-本文给出新 macOS/Linux 开发机的最短安装与验证路径。release version、Package 列表和 App artifact 必须从 owner current source读取。
+本文给出新 macOS/Linux 开发机的最短安装与验证路径。release version、Package 列表和 App artifact 必须从 owner current source读取。产品分工见 [项目概览](../../project.md#产品分层)，安装与发布 owner 见 [仓库地图](../../public/repo-map.md)。
 
 ## 选择产品
 
@@ -38,7 +38,7 @@ opl app state --profile fast --json
 
 ## 安装 App
 
-App installer 和发布资产归 `one-person-lab-app`：
+App installer 和发布资产归 [`one-person-lab-app`](https://github.com/gaofeng21cn/one-person-lab-app#readme)，当前 Shell 选择与 Desktop/WebUI/Docker 构建实现由 App contract 维护：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gaofeng21cn/one-person-lab-app/main/install.sh | bash
@@ -56,7 +56,7 @@ opl packages install <package-id> --json
 opl packages status --package-id <package-id> --json
 ```
 
-不要把本文中的示例变成固定 starter list。App official profile、用户选择和 installed carrier readback决定实际 Package 集合。
+App official profile、用户选择和 installed carrier readback决定实际 Package 集合。安装后，Framework 从 installed descriptor 发现 Agent、Skill、Tool、Plugin、MCP 和 entrypoint，并向 App 投影入口；产品线示例不决定安装集合。
 
 ## 完成标准
 

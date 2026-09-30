@@ -1,10 +1,10 @@
 # OPL Docker WebUI 部署
 
-WebUI image、container entrypoint、认证和 release 归 One Person Lab App/shell owner。Framework 只提供 headless Base、seed/currentness readback和App machine surface。
+WebUI image、container entrypoint、认证和 release 归 One Person Lab App/shell owner。当前构建实现与 Host 范围见 [仓库地图](../../public/repo-map.md#产品-owners)；Framework 只提供 headless Base、seed/currentness readback和App machine surface。
 
 ## 获取当前 image
 
-从 App owner release页面读取 image ref、digest、port、volume和environment contract。不要从本文猜测版本或复制旧 image coordinates。
+从 [App owner 发布入口](https://github.com/gaofeng21cn/one-person-lab-app#readme)读取 image ref、digest、port、volume和environment contract。不要从本文猜测版本或复制旧 image coordinates。
 
 ## 持久化边界
 

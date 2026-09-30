@@ -71,7 +71,7 @@ One Person Lab 对用户呈现为一个连续产品，并用四个稳定对象�
 
 **OPL Cloud** 是 One Person Lab 正在建设和持续交付的云端产品，把同一条工作线延伸到在线工作空间、账号治理、托管资源、组织协作和智能体服务。它与 Base、App、Packages 共同构成完整而连续的四层产品体系。
 
-Foundry Agents 是 OPL Packages 中的专业智能体家族。不同领域需要不同的材料理解、工作方法、质量标准和交付责任。以下专业智能体展示不同领域的分工；可用成员以实际安装的 Package 为准：
+Foundry Agents 是 OPL Packages 中的专业智能体家族。不同领域需要不同的材料理解、工作方法、质量标准和交付责任。以下是不同领域分工的示例，不是完整成员或安装清单；可用入口来自已安装 Package 的能力声明与 Framework 投影：
 
 - [Med Auto Science（MAS）](https://github.com/gaofeng21cn/med-autoscience)：医学研究与论文交付；
 - [Med Auto Grant（MAG）](https://github.com/gaofeng21cn/med-autogrant)：基金方向、申请书、模拟评审与修订；
@@ -175,14 +175,14 @@ Framework 说明运行是否发生、文件和证据在哪里；App 说明用户
 
 - **OPL Base**：Framework、执行环境和通用运行能力；
 - **OPL App**：桌面工作台与统一的产品体验；
-- **OPL Packages**：MAS、MAG、RCA、OMA、OPL Book Forge、工作流与能力包；
+- **OPL Packages**：按工作需要安装的专业 Agent、技能、工具与工作流；
 - **OPL Cloud**：在线工作空间、账号治理、托管资源、协作与智能体服务。
 
 Base 管共同底座，App 管本地体验，Packages 管专业能力，Cloud 管在线服务。前三类以本地软件方式安装和更新，Cloud 通过在线产品持续交付；四者采用各自合适的交付方式，共同维持一致的任务、成果、证据和责任语言。各项能力可以独立演进和组合，用户仍只需选择适合自己的工作方式。
 
 OPL Cloud 扩展工作位置、资源与治理能力，让用户从本机进入在线工作空间、远端资源或团队协作时，继续沿用同一套专业工作模型。
 
-One Person Lab App 始终作为一个产品定义行为和正式发布体验。界面可以持续演进，用户的任务、能力包、状态、操作和专业判断始终保持连续；每次正式发布只呈现一套经过完整验证的产品体验。
+One Person Lab App 作为一个产品定义行为和正式发布体验，负责在界面演进时保留任务、能力包、状态和操作的连续性。安装、旧版升级与 Preview 到 Stable 的迁移分别需要验收，正式版本发布不能替代迁移路径的实际证据。支持路径与验收边界由 [App 发布合同](https://github.com/gaofeng21cn/one-person-lab-app/blob/main/contracts/app-release-channel.json) 和 [App 当前状态](https://github.com/gaofeng21cn/one-person-lab-app/blob/main/docs/status.md) 维护。
 
 ## 信任如何由证据建立
 
@@ -202,7 +202,7 @@ OPL 用克制建立这种信任：
 
 One Person Lab 的长期目标，是让一个人也能拥有过去只有专业团队才能提供的持续推进能力。
 
-AI 负责理解、比较、创作、审阅和修订；OPL Framework 负责阶段、工作空间、证据、恢复与交接；App 把这些能力变成清楚、可操作的工作体验，Cloud 将体验扩展到在线工作空间、远端资源和协作；MAS、MAG、RCA、OMA 与 OPL Book Forge 等专业智能体 负责各自的专业判断，并把最终交付或采用决定交回相应负责人。
+AI 负责理解、比较、创作、审阅和修订；OPL Framework 负责阶段、工作空间、证据、恢复与交接；App 把这些能力变成清楚、可操作的工作体验，Cloud 将体验扩展到在线工作空间、远端资源和协作；各专业智能体负责自己的专业判断，并把最终交付或采用决定交回相应负责人。
 
 OPL 相信，真正优秀的 AI 产品既能在用户提出问题时给出高质量回应，也能在漫长、复杂、充满反复的正式工作中，始终让下一份成果更近，让每个判断有依据，让每个问题有去向，让最终交付值得相信。
 
