@@ -4,7 +4,7 @@
   "package_id": "med-autocast",
   "display_name": "Med Auto Cast",
   "publisher": "one-person-lab",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "source": "first_party",
   "carrier_source_role": "codex_plugin_default_carrier_not_package_truth",
   "codex_surface": {
@@ -22,8 +22,8 @@
       "marketplace_source": "gaofeng21cn/med-autocast",
       "publication_ref": "ghcr.io/gaofeng21cn/one-person-lab-packages/med-autocast:latest-stable"
     },
-    "plugin_payload_manifest_url": "payloads/med-autocast-0.2.2.json",
-    "carrier_source_commit": "e488f6cba2efe89cc858aecbb854e555a8a1ff4f"
+    "plugin_payload_manifest_url": "payloads/med-autocast-0.2.3.json",
+    "carrier_source_commit": "ef901a0fc1e271bf5954ac7d0248c9319c658751"
   },
   "dependency_profiles": [],
   "capability_dependencies": [],
@@ -35,12 +35,12 @@
       "en-US": "Med Auto Cast"
     },
     "description_i18n": {
-      "zh-CN": "医学科普视频规划、制作、视听复核与关键帧资产整理。",
-      "en-US": "Medical education video planning, production, audiovisual review, and keyframe curation."
+      "zh-CN": "医学科普动画规划、制作、视听复核与可复用素材保管。",
+      "en-US": "Medical education animation planning, production, audiovisual review, and reusable element curation."
     },
     "session_routing_summary_i18n": {
-      "en-US": "Plan evidence-based medical education videos, direct their stories, review audiovisual quality, and curate reusable keyframes.",
-      "zh-CN": "规划循证医学科普视频，设计叙事与镜头，复核视听质量并整理可复用关键帧。"
+      "en-US": "Plan evidence-based medical education animations, direct their stories, review audiovisual quality, and preserve reusable visual, code, motion, and audio elements.",
+      "zh-CN": "规划循证医学科普动画，设计叙事与镜头，复核视听质量并保管可复用图像、代码、动作与声音。"
     },
     "home_shortcuts": [
       {
