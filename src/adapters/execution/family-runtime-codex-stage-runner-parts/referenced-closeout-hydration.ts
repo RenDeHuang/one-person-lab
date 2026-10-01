@@ -165,8 +165,15 @@ function observeReferencedCloseout(input: {
 }
 
 function referenceMetadata(closeout: TypedStageCloseoutPacket) {
+  // closeout_ref_metadata entries carry both `kind` (artifact kind) and
+  // `ref_kind` (role label). A self-referenced closeout entry declares the
+  // packet surface kind in `kind`; some agents place it in `ref_kind` instead.
+  // The packet surface kind uniquely identifies the referenced closeout, so
+  // honor it in either declared transport field rather than dropping the
+  // reference and silently losing route_impact.
   return (closeout.closeout_ref_metadata ?? []).filter(
-    (entry) => optionalString(entry.kind) === 'stage_attempt_closeout_packet',
+    (entry) => optionalString(entry.kind) === 'stage_attempt_closeout_packet'
+      || optionalString(entry.ref_kind) === 'stage_attempt_closeout_packet',
   );
 }
 
