@@ -208,3 +208,61 @@ test('declared artifacts supplement through dual-label closeout aliases and stil
     /conflicting byte sizes/,
   );
 });
+
+test('stage run input supplementation matches the exact ref, not only the bound bytes', () => {
+  // A producer may enumerate a StageRun input under an equivalent but differently encoded
+  // locator: a percent-decoded file:// URL names the same bytes as the framework-owned
+  // percent-encoded binding. Supplementation used to dedupe on (sha256, size_bytes) alone,
+  // so the member survived with the author-supplied ref and the exact-ref coverage check
+  // below rejected the whole request, hard-stopping the StageRun before any reviewer ran.
+  const encodedRef = 'file:///workspace/%E7%8E%8B%E5%81%A5/request.json';
+  const decodedRef = 'file:///workspace/王健/request.json';
+  const requestSha = sha('request');
+  const sizeBytes = 7;
+  const owner = { kind: 'medical_scope', ref: 'file:///workspace/scope.json', sha256: sha('scope'), size_bytes: 5 };
+  const authority = {
+    producer_attempt_ref: attemptRef,
+    execution_content_binding_sha256: bindingHash,
+    owner_authority_refs: [owner],
+    stage_run_input_authority_refs: [
+      { kind: 'stage_run_input_artifact', ref: encodedRef, sha256: requestSha, size_bytes: sizeBytes },
+    ],
+  };
+  const flat = {
+    surface_kind: 'opl_reviewer_input_snapshot_materialization_request',
+    schema_version: 2,
+    producer_attempt_ref: attemptRef,
+    execution_content_binding_sha256: bindingHash,
+    workspace_root: '/tmp/snapshot-authoring',
+    owner_authority_ref: owner,
+  };
+  const sameBytes = [{
+    member_id: 'request',
+    source_ref: decodedRef,
+    sha256: requestSha,
+    size_bytes: sizeBytes,
+  }];
+  const materialized = completeReviewerSnapshotTransportEnvelope(
+    { ...flat, members: sameBytes },
+    authority,
+    { refs: [], hashes: [] },
+  );
+  assert.deepEqual(
+    materialized.members.filter((member) => member.sha256 === requestSha).map((member) => member.source_ref).sort(),
+    [decodedRef, encodedRef].sort(),
+  );
+  // A member that already carries the framework-owned ref is not duplicated.
+  const exact = completeReviewerSnapshotTransportEnvelope(
+    { ...flat, members: [{ ...sameBytes[0]!, source_ref: encodedRef }] },
+    authority,
+    { refs: [], hashes: [] },
+  );
+  assert.equal(exact.members.length, 1);
+  // The supplement still cannot widen scope to bytes the Stage never froze as an input.
+  const unbound = completeReviewerSnapshotTransportEnvelope(
+    { ...flat, members: [{ member_id: 'other', source_ref: 'file:///workspace/other.json', sha256: sha('other'), size_bytes: 5 }] },
+    authority,
+    { refs: [], hashes: [] },
+  );
+  assert.deepEqual(unbound.members.map((member) => member.sha256).sort(), [requestSha, sha('other')].sort());
+});
