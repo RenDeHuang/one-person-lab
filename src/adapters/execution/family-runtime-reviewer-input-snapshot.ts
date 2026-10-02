@@ -544,7 +544,13 @@ export function completeReviewerSnapshotTransportEnvelope(
   // inventory therefore still yields the exact mandated scope instead of deterministically
   // failing the StageRun before the reviewer starts.
   for (const inputRef of authority.stage_run_input_authority_refs!) {
-    if (members.some((item) => item.sha256 === inputRef.sha256 && item.size_bytes === inputRef.size_bytes)) continue;
+    // The validator below matches on the exact (source_ref, sha256, size_bytes) triple. Deduplicating
+    // on bytes alone would leave a producer member that carries the same bytes under an equivalent
+    // but differently encoded locator (for example a percent-decoded file:// URL) unsupplemented, and
+    // the exact-ref coverage check would then hard-stop the StageRun before any reviewer starts.
+    if (members.some((item) => item.source_ref === inputRef.ref
+      && item.sha256 === inputRef.sha256
+      && item.size_bytes === inputRef.size_bytes)) continue;
     members.push({
       member_id: `opl-stage-run-input-${inputRef.sha256.slice('sha256:'.length)}`,
       source_ref: inputRef.ref,
