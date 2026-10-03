@@ -176,14 +176,14 @@ function nonEmptyStrings(value: unknown, field: string) {
 // that locator is therefore either the locator string itself or that exact ref object. This
 // normalization accepts both, keeps the normalized contract a `string[]`, and stays fail-closed
 // for anything else so a genuinely malformed ref list is still rejected with the same error.
-function evidenceRefStrings(value: unknown, field: string) {
-  if (!Array.isArray(value) || value.length === 0) {
+function evidenceRefStrings(value: unknown, field: string, allowEmpty = false) {
+  if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) {
     throw new FrameworkContractError('contract_shape_invalid', `${field} must contain non-empty string refs.`, {
       field,
     });
   }
   const refs = value.map((entry) => {
-    if (typeof entry === 'string') {
+    if (typeof entry === 'string' && entry.trim()) {
       return entry;
     }
     if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
@@ -725,6 +725,7 @@ export function validateStageQualityRepairMap(input: {
       changed_artifact_refs: evidenceRefStrings(
         entry.changed_artifact_refs,
         `repair_map.${findingId}.changed_artifact_refs`,
+        true, // A not_repaired or blocked repair need not claim an artifact change.
       ),
       repair_evidence_refs: evidenceRefStrings(
         entry.repair_evidence_refs,

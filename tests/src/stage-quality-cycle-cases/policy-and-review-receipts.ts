@@ -49,6 +49,7 @@ import {
   reviewReceipt,
 } from './shared.ts';
 import type { StandardAgentStageQualityRuntimeBinding, TemporalStageRunWorkflowState } from './shared.ts';
+import { validateStageQualityRepairMap } from '../../../src/authority/stages/stage-quality-cycle.ts';
 test('official quality profile is explicit without adding per-agent registry policy', () => {
   const bound = STANDARD_AGENT_REGISTRY
     .filter((entry) => 'quality_governance_profile' in entry)
@@ -664,7 +665,8 @@ test('finding evidence refs accept the framework published exact-ref locator sha
   };
   const normalized = validateInitialStageQualityReviewOutcome({
     outcome: 'repair_required',
-    findings: [{ ...base, evidence_refs: [exactRef, 'evidence:prose-locator'] }],
+    // Exercise raw Attempt transport input; the normalized public type remains string[].
+    findings: [{ ...base, evidence_refs: [exactRef, 'evidence:prose-locator'] as unknown as string[] }],
   });
   assert.deepEqual(normalized[0]!.evidence_refs, [exactRef.ref, 'evidence:prose-locator']);
   // A prose locator alone still normalizes unchanged.
@@ -679,6 +681,9 @@ test('finding evidence refs accept the framework published exact-ref locator sha
   // an object carrying a non-empty `ref`, are still rejected with the canonical error.
   for (const evidence_refs of [
     [],
+    [''],
+    ['   '],
+    [exactRef, '   '],
     [exactRef, { kind: 'opl_reviewer_input_snapshot_member' }],
     [{ size_bytes: 8095, sha256: `sha256:${'a'.repeat(64)}` }],
     [{ ref: '   ' }],
@@ -687,7 +692,7 @@ test('finding evidence refs accept the framework published exact-ref locator sha
     assert.throws(
       () => validateInitialStageQualityReviewOutcome({
         outcome: 'repair_required',
-        findings: [{ ...base, evidence_refs }],
+        findings: [{ ...base, evidence_refs: evidence_refs as unknown as string[] }],
       }),
       /must contain non-empty string refs/,
     );
@@ -714,15 +719,15 @@ test('repair map and closure evidence refs accept the same exact-ref locator sha
       finding_id: finding.finding_id,
       repair_status: 'repaired',
       changed_artifact_refs: [exactRef.ref],
-      repair_evidence_refs: [exactRef],
+      repair_evidence_refs: [exactRef] as unknown as string[],
     }],
     reReview: {
-      finding_closures: [{ finding_id: finding.finding_id, status: 'closed', evidence_refs: [exactRef] }],
+      finding_closures: [{ finding_id: finding.finding_id, status: 'closed', evidence_refs: [exactRef] as unknown as string[] }],
       repair_regressions: [],
       critical_new_findings: [],
       optional_observations: [{
         observation_id: 'observation:wording',
-        evidence_refs: [exactRef],
+        evidence_refs: [exactRef] as unknown as string[],
         summary: 'Wording only.',
       }],
     },
@@ -733,4 +738,15 @@ test('repair map and closure evidence refs accept the same exact-ref locator sha
   assert.equal(closure.trigger_repair, false);
   // The cited snapshot locator is preserved as its ref string in closure facts too.
   assert.deepEqual(closure.optional_observation_ids, ['observation:wording']);
+  for (const repair_status of ['not_repaired', 'blocked'] as const) {
+    assert.deepEqual(validateStageQualityRepairMap({
+      findings: [finding],
+      repairMap: [{
+        finding_id: finding.finding_id,
+        repair_status,
+        changed_artifact_refs: [],
+        repair_evidence_refs: [exactRef] as unknown as string[],
+      }],
+    })[0]!.changed_artifact_refs, []);
+  }
 });

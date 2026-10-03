@@ -326,22 +326,29 @@ test('protocol resume binds observed bytes for a self-referenced packet while re
     sha256: guessedSha256,
     sizeBytes: guessedSize,
   });
+  const noDeclaredIdentity = {
+    ...resumePointer,
+    closeout_ref_metadata: [{ kind: 'stage_attempt_closeout_packet', ref: closeoutRef }],
+  };
 
   try {
-    const resolved = resolveProtocolCloseoutResumePacket({
-      initialCandidate: resumePointer,
-      resumedCandidate: resumePointer,
-      resumedCloseout: normalizeTypedStageCloseoutPacket(resumePointer),
-      attempt: runAttempt,
-      workspaceRoot,
-      protocolViolation: false,
-    });
-    assert.equal(resolved.hydrationStatus, 'hydrated');
-    assert.equal(resolved.observation?.sha256, sha256(closeoutBytes));
-    assert.equal(resolved.observation?.size_bytes, closeoutBytes.length);
-    assert.deepEqual(resolved.closeoutPacket?.route_impact, {
-      stage_quality_cycle: { outcome: 'repair_required', artifact_refs: ['artifact:self'] },
-    });
+    for (const pointer of [resumePointer, noDeclaredIdentity]) {
+      const resolved = resolveProtocolCloseoutResumePacket({
+        initialCandidate: pointer,
+        resumedCandidate: pointer,
+        resumedCloseout: normalizeTypedStageCloseoutPacket(pointer),
+        attempt: runAttempt,
+        workspaceRoot,
+        protocolViolation: false,
+      });
+      assert.equal(resolved.hydrationStatus, 'hydrated');
+      assert.equal(resolved.observation?.sha256, sha256(closeoutBytes));
+      assert.equal(resolved.observation?.size_bytes, closeoutBytes.length);
+      assert.deepEqual(resolved.closeoutPacket?.route_impact, {
+        stage_quality_cycle: { outcome: 'repair_required', artifact_refs: ['artifact:self'] },
+      });
+      assert.equal(resolved.closeoutPacket?.closeout_ref_metadata?.[0]?.sha256, sha256(closeoutBytes));
+    }
 
     // The strict recovery path keeps the declared digest as a real anchor and
     // still fails closed, because there the ref is framework-authored.
