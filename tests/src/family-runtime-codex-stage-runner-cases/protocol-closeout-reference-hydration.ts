@@ -296,3 +296,66 @@ test('referenced closeout hydration fails closed on digest, size, workspace, and
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
   }
 });
+
+test('protocol resume binds observed bytes for a self-referenced packet while recovery stays fail-closed', () => {
+  // A closeout packet cannot declare the digest of itself: the bytes would have to
+  // contain the hash of the bytes that include that hash. The protocol resume
+  // contract nonetheless tells the Attempt to cite the workspace packet it just
+  // wrote and to state its "exact sha256". An Attempt that follows that contract
+  // can only guess, so a wrong declared digest must not hard-stop an otherwise
+  // byte-, workspace-, and Attempt-identity-verified packet on the resume path.
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-self-ref-resume-'));
+  const workspaceRoot = path.join(fixtureRoot, 'workspace');
+  fs.mkdirSync(workspaceRoot, { recursive: true });
+  const runAttempt = attempt(workspaceRoot);
+  const closeoutPath = path.join(workspaceRoot, 'closeout.json');
+  const closeoutBytes = writeJson(closeoutPath, {
+    surface_kind: 'stage_attempt_closeout_packet',
+    stage_attempt_id: runAttempt.stage_attempt_id,
+    stage_run_id: runAttempt.stage_run_id,
+    quality_cycle_id: runAttempt.quality_cycle_id,
+    attempt_role: runAttempt.attempt_role,
+    route_impact: { stage_quality_cycle: { outcome: 'repair_required', artifact_refs: ['artifact:self'] } },
+  });
+  const closeoutRef = pathToFileURL(closeoutPath).href;
+  const guessedSha256 = `sha256:${'a'.repeat(64)}`;
+  const guessedSize = closeoutBytes.length + 4096;
+  const resumePointer = resumedReference({
+    attemptId: runAttempt.stage_attempt_id,
+    ref: closeoutRef,
+    sha256: guessedSha256,
+    sizeBytes: guessedSize,
+  });
+
+  try {
+    const resolved = resolveProtocolCloseoutResumePacket({
+      initialCandidate: resumePointer,
+      resumedCandidate: resumePointer,
+      resumedCloseout: normalizeTypedStageCloseoutPacket(resumePointer),
+      attempt: runAttempt,
+      workspaceRoot,
+      protocolViolation: false,
+    });
+    assert.equal(resolved.hydrationStatus, 'hydrated');
+    assert.equal(resolved.observation?.sha256, sha256(closeoutBytes));
+    assert.equal(resolved.observation?.size_bytes, closeoutBytes.length);
+    assert.deepEqual(resolved.closeoutPacket?.route_impact, {
+      stage_quality_cycle: { outcome: 'repair_required', artifact_refs: ['artifact:self'] },
+    });
+
+    // The strict recovery path keeps the declared digest as a real anchor and
+    // still fails closed, because there the ref is framework-authored.
+    assert.throws(() => hydrateReferencedStageAttemptCloseout({
+      resumedCloseout: normalizeTypedStageCloseoutPacket(resumePointer),
+      resumedCandidate: resumePointer,
+      attempt: runAttempt,
+      workspaceRoot,
+    }), (error: unknown) => {
+      assert.ok(error instanceof FrameworkContractError);
+      assert.equal(error.details?.blocked_reason, 'referenced_closeout_sha256_mismatch');
+      return true;
+    });
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
