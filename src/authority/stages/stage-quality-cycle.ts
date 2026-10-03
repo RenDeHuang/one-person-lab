@@ -169,6 +169,36 @@ function nonEmptyStrings(value: unknown, field: string) {
   return [...new Set(value.map((entry) => entry.trim()))];
 }
 
+// Evidence and citation ref lists are authored by Codex Attempts, and the Stage contract
+// points those Attempts at locators the framework itself publishes as objects: the reviewer
+// is told to read review content from `opl_reviewer_input_snapshot_manifest.members[].immutable_ref`,
+// whose schema shape is an exact ref (`{kind, ref, size_bytes, sha256}`). A faithful citation of
+// that locator is therefore either the locator string itself or that exact ref object. This
+// normalization accepts both, keeps the normalized contract a `string[]`, and stays fail-closed
+// for anything else so a genuinely malformed ref list is still rejected with the same error.
+function evidenceRefStrings(value: unknown, field: string) {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new FrameworkContractError('contract_shape_invalid', `${field} must contain non-empty string refs.`, {
+      field,
+    });
+  }
+  const refs = value.map((entry) => {
+    if (typeof entry === 'string') {
+      return entry;
+    }
+    if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+      const ref = (entry as Record<string, unknown>).ref;
+      if (typeof ref === 'string' && ref.trim()) {
+        return ref;
+      }
+    }
+    throw new FrameworkContractError('contract_shape_invalid', `${field} must contain non-empty string refs.`, {
+      field,
+    });
+  });
+  return [...new Set(refs.map((entry) => entry.trim()))];
+}
+
 function nonEmptyStringSequence(value: unknown, field: string) {
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string' || !entry.trim())) {
     throw new FrameworkContractError('contract_shape_invalid', `${field} must contain non-empty strings.`, {
@@ -631,7 +661,7 @@ export function validateStageQualityFindings(findings: StageQualityFinding[]) {
     return {
       ...finding,
       finding_id: findingId,
-      evidence_refs: nonEmptyStrings(finding.evidence_refs, `findings.${findingId}.evidence_refs`),
+      evidence_refs: evidenceRefStrings(finding.evidence_refs, `findings.${findingId}.evidence_refs`),
       repair_expectation: requiredText(
         finding.repair_expectation,
         `findings.${findingId}.repair_expectation`,
@@ -692,11 +722,11 @@ export function validateStageQualityRepairMap(input: {
     return {
       ...entry,
       finding_id: findingId,
-      changed_artifact_refs: nonEmptyStrings(
+      changed_artifact_refs: evidenceRefStrings(
         entry.changed_artifact_refs,
         `repair_map.${findingId}.changed_artifact_refs`,
       ),
-      repair_evidence_refs: nonEmptyStrings(
+      repair_evidence_refs: evidenceRefStrings(
         entry.repair_evidence_refs,
         `repair_map.${findingId}.repair_evidence_refs`,
       ),
@@ -741,7 +771,7 @@ export function evaluateStageQualityFindingClosure(input: {
     return {
       ...closure,
       finding_id: findingId,
-      evidence_refs: nonEmptyStrings(
+      evidence_refs: evidenceRefStrings(
         closure.evidence_refs,
         `finding_closures.${findingId}.evidence_refs`,
       ),
@@ -787,7 +817,7 @@ export function evaluateStageQualityFindingClosure(input: {
   const optionalObservations = input.reReview.optional_observations.map((observation) => ({
     ...observation,
     observation_id: requiredText(observation.observation_id, 'optional_observations.observation_id'),
-    evidence_refs: nonEmptyStrings(
+    evidence_refs: evidenceRefStrings(
       observation.evidence_refs,
       `optional_observations.${observation.observation_id}.evidence_refs`,
     ),
