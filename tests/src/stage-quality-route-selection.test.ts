@@ -442,3 +442,38 @@ test('complete is the only route decision that omits a target Stage', () => {
     },
   }), /invalid or non-authoritative cross-Stage route output/);
 });
+
+test('route evidence accepts the published snapshot exact-ref locator shape', () => {
+  // The reviewer cites a snapshot locator, whose framework-published manifest shape is an exact ref
+  // object rather than a bare string. A route_back decision carrying that shape used to have its
+  // evidence silently filtered out, which made the substantive cross-Stage decision
+  // non-authoritative and discarded it with no error at all.
+  const exactRef = {
+    kind: 'opl_reviewer_input_snapshot_member',
+    ref: 'file:///state/review-transport/reviewer-input-snapshots/objects/abc.bin',
+    size_bytes: 8095,
+    sha256: `sha256:${'c'.repeat(64)}`,
+  };
+  const evaluation = assertQualityAttemptTerminalRouteSelection({
+    attempt: attempt({ role: 'reviewer', decisiveRoles: ['reviewer', 're_reviewer'] }),
+    routeImpact: {
+      stage_route_decision: { decision_kind: 'route_back', target_stage_id: 'author', evidence_refs: [exactRef] },
+      stage_quality_cycle: { outcome: 'repair_required' },
+    },
+  });
+  assert.deepEqual(evaluation.decision, {
+    decision_kind: 'route_back',
+    target_stage_id: 'author',
+    evidence_refs: [exactRef.ref],
+  });
+  // The tolerance stays fail-closed: an evidence list with no usable ref is still non-authoritative.
+  const noUsableRef = evaluateStageQualityAttemptRoute({
+    attempt: attempt({ role: 'reviewer', decisiveRoles: ['reviewer', 're_reviewer'] }),
+    routeImpact: {
+      stage_route_decision: { decision_kind: 'route_back', target_stage_id: 'author', evidence_refs: [{ kind: 'x' }, 42] },
+      stage_quality_cycle: { outcome: 'repair_required' },
+    },
+  });
+  assert.equal(noUsableRef.decision, null);
+  assert.ok(noUsableRef.decision_rejection_reasons.includes('route_selection_requires_evidence_refs'));
+});
