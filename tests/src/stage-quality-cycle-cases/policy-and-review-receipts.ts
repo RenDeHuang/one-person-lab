@@ -642,3 +642,95 @@ test('Re-review prompt requires closure fields only for non-hard-stop outcomes',
   assert.match(prompt, /For a non-hard-stop re_reviewer outcome, required route_impact\.stage_quality_cycle fields are outcome, finding_closures/);
   assert.match(prompt, /For outcome=blocked or outcome=human_gate, return only outcome plus the required hard-stop evidence; do not fabricate a finding-closure result/);
 });
+
+test('finding evidence refs accept the framework published exact-ref locator shape', () => {
+  // The reviewer is told to read review content only from
+  // `opl_reviewer_input_snapshot_manifest.members[].immutable_ref`, whose schema shape is an
+  // exact ref (`{kind, ref, size_bytes, sha256}`). A faithful citation of that locator therefore
+  // arrives either as the locator string or as that object. The second form used to hard-stop the
+  // StageRun with `findings.<id>.evidence_refs must contain non-empty string refs.`, before any
+  // repair round could run.
+  const exactRef = {
+    kind: 'opl_reviewer_input_snapshot_member',
+    ref: 'file:///state/review-transport/reviewer-input-snapshots/objects/abc.bin',
+    size_bytes: 8095,
+    sha256: `sha256:${'a'.repeat(64)}`,
+  };
+  const base = {
+    finding_id: 'REV-MED-001',
+    severity: 'major' as const,
+    required: true,
+    repair_expectation: 'Repair the cited defect.',
+  };
+  const normalized = validateInitialStageQualityReviewOutcome({
+    outcome: 'repair_required',
+    findings: [{ ...base, evidence_refs: [exactRef, 'evidence:prose-locator'] }],
+  });
+  assert.deepEqual(normalized[0]!.evidence_refs, [exactRef.ref, 'evidence:prose-locator']);
+  // A prose locator alone still normalizes unchanged.
+  assert.deepEqual(
+    validateInitialStageQualityReviewOutcome({
+      outcome: 'repair_required',
+      findings: [{ ...base, evidence_refs: ['evidence:prose-locator'] }],
+    })[0]!.evidence_refs,
+    ['evidence:prose-locator'],
+  );
+  // The tolerance must stay fail-closed: empty lists, and entries that are neither a string nor
+  // an object carrying a non-empty `ref`, are still rejected with the canonical error.
+  for (const evidence_refs of [
+    [],
+    [exactRef, { kind: 'opl_reviewer_input_snapshot_member' }],
+    [{ size_bytes: 8095, sha256: `sha256:${'a'.repeat(64)}` }],
+    [{ ref: '   ' }],
+    [42],
+  ]) {
+    assert.throws(
+      () => validateInitialStageQualityReviewOutcome({
+        outcome: 'repair_required',
+        findings: [{ ...base, evidence_refs }],
+      }),
+      /must contain non-empty string refs/,
+    );
+  }
+});
+
+test('repair map and closure evidence refs accept the same exact-ref locator shape', () => {
+  const exactRef = {
+    kind: 'opl_reviewer_input_snapshot_member',
+    ref: 'file:///state/review-transport/reviewer-input-snapshots/objects/def.bin',
+    size_bytes: 723,
+    sha256: `sha256:${'b'.repeat(64)}`,
+  };
+  const finding = {
+    finding_id: 'finding:required',
+    severity: 'major' as const,
+    required: true,
+    evidence_refs: ['evidence:required'],
+    repair_expectation: 'Repair the required finding.',
+  };
+  const closure = evaluateStageQualityFindingClosure({
+    findings: [finding],
+    repairMap: [{
+      finding_id: finding.finding_id,
+      repair_status: 'repaired',
+      changed_artifact_refs: [exactRef.ref],
+      repair_evidence_refs: [exactRef],
+    }],
+    reReview: {
+      finding_closures: [{ finding_id: finding.finding_id, status: 'closed', evidence_refs: [exactRef] }],
+      repair_regressions: [],
+      critical_new_findings: [],
+      optional_observations: [{
+        observation_id: 'observation:wording',
+        evidence_refs: [exactRef],
+        summary: 'Wording only.',
+      }],
+    },
+  });
+  assert.deepEqual(closure.open_required_finding_ids, []);
+  assert.deepEqual(closure.repair_regression_ids, []);
+  assert.deepEqual(closure.critical_new_finding_ids, []);
+  assert.equal(closure.trigger_repair, false);
+  // The cited snapshot locator is preserved as its ref string in closure facts too.
+  assert.deepEqual(closure.optional_observation_ids, ['observation:wording']);
+});
