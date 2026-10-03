@@ -39,9 +39,10 @@ function hydrationError(input: {
   });
 }
 
-function canonicalSha256(value: unknown, ref: string) {
+function canonicalSha256(value: unknown, ref: string, options: { optional?: boolean } = {}) {
   const normalized = optionalString(value)?.toLowerCase();
   if (!normalized || !SHA256_PATTERN.test(normalized)) {
+    if (options.optional) return null;
     hydrationError({
       message: 'Referenced closeout metadata must declare a canonical SHA-256 digest.',
       blockedReason: 'referenced_closeout_sha256_missing_or_invalid',
@@ -80,9 +81,20 @@ function localPathForRef(ref: string, workspaceRoot: string) {
 
 function observeReferencedCloseout(input: {
   ref: string;
-  sha256: string;
+  sha256: string | null;
   sizeBytes?: number;
   workspaceRoot: string;
+  // A self-referenced closeout packet cannot declare its own digest: the file would
+  // have to contain the hash of the bytes that include that hash. The protocol
+  // resume prompt therefore asks an Attempt to cite the workspace packet it just
+  // wrote, and the framework cannot treat that self-assertion as an independent
+  // trust anchor. `bind_observed` keeps every real boundary check (workspace
+  // containment, stable bytes, exact Attempt identity, surface kind) and binds the
+  // digest of the bytes actually observed, matching what the metadata merge
+  // downstream already does. `verify_declared` keeps the strict anchor used by the
+  // recovery paths, whose refs are authored by the framework rather than by the
+  // Attempt.
+  identityPolicy?: 'verify_declared' | 'bind_observed';
 }): ReferencedCloseoutObservation {
   let realWorkspaceRoot: string;
   let realFilePath: string;
@@ -108,6 +120,7 @@ function observeReferencedCloseout(input: {
     });
   }
 
+  const identityPolicy = input.identityPolicy ?? 'verify_declared';
   let descriptor: number | null = null;
   try {
     descriptor = fs.openSync(realFilePath, 'r');
@@ -137,21 +150,23 @@ function observeReferencedCloseout(input: {
       });
     }
     const observedSha256 = `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`;
-    if (observedSha256 !== input.sha256) {
-      hydrationError({
-        message: 'Referenced closeout SHA does not match the stable local file bytes.',
-        blockedReason: 'referenced_closeout_sha256_mismatch',
-        ref: input.ref,
-        details: { declared_sha256: input.sha256, observed_sha256: observedSha256 },
-      });
-    }
-    if (input.sizeBytes !== undefined && input.sizeBytes !== bytes.length) {
-      hydrationError({
-        message: 'Referenced closeout size does not match the stable local file bytes.',
-        blockedReason: 'referenced_closeout_size_mismatch',
-        ref: input.ref,
-        details: { declared_size_bytes: input.sizeBytes, observed_size_bytes: bytes.length },
-      });
+    if (identityPolicy === 'verify_declared') {
+      if (input.sha256 !== null && observedSha256 !== input.sha256) {
+        hydrationError({
+          message: 'Referenced closeout SHA does not match the stable local file bytes.',
+          blockedReason: 'referenced_closeout_sha256_mismatch',
+          ref: input.ref,
+          details: { declared_sha256: input.sha256, observed_sha256: observedSha256 },
+        });
+      }
+      if (input.sizeBytes !== undefined && input.sizeBytes !== bytes.length) {
+        hydrationError({
+          message: 'Referenced closeout size does not match the stable local file bytes.',
+          blockedReason: 'referenced_closeout_size_mismatch',
+          ref: input.ref,
+          details: { declared_size_bytes: input.sizeBytes, observed_size_bytes: bytes.length },
+        });
+      }
     }
     return {
       ref: input.ref,
@@ -374,6 +389,10 @@ export function hydrateReferencedStageAttemptCloseout(input: {
   attempt: JsonRecord;
   workspaceRoot: string;
   preservedRouteImpact?: JsonRecord | null;
+  // Defaults to the strict framework-authored anchor. The protocol resume path
+  // passes `bind_observed` because the reference there is the Attempt's own
+  // self-citation, which cannot carry an independent digest of itself.
+  identityPolicy?: 'verify_declared' | 'bind_observed';
 }) {
   if (!input.resumedCloseout) {
     return { status: 'not_applicable' as const, closeoutPacket: null, observation: null };
@@ -403,9 +422,11 @@ export function hydrateReferencedStageAttemptCloseout(input: {
       ref: 'missing',
     });
   }
+  const identityPolicy = input.identityPolicy ?? 'verify_declared';
   const declaredSize = reference.size_bytes;
   if (
-    declaredSize !== undefined
+    identityPolicy === 'verify_declared'
+    && declaredSize !== undefined
     && (!Number.isSafeInteger(declaredSize) || (declaredSize as number) < 0)
   ) {
     hydrationError({
@@ -416,9 +437,17 @@ export function hydrateReferencedStageAttemptCloseout(input: {
   }
   const observation = observeReferencedCloseout({
     ref,
-    sha256: canonicalSha256(reference.sha256, ref),
-    sizeBytes: declaredSize as number | undefined,
+    // Under `bind_observed` the declared digest is an Attempt self-assertion and
+    // is not used as a trust anchor, so a missing or malformed value must not by
+    // itself hard-stop an otherwise byte- and identity-verified packet.
+    sha256: identityPolicy === 'bind_observed'
+      ? canonicalSha256(reference.sha256, ref, { optional: true })
+      : canonicalSha256(reference.sha256, ref),
+    sizeBytes: identityPolicy === 'bind_observed' || typeof declaredSize !== 'number'
+      ? undefined
+      : declaredSize as number,
     workspaceRoot: input.workspaceRoot,
+    identityPolicy,
   });
 
   let hydratedCandidate: unknown;
@@ -516,6 +545,11 @@ export function resolveProtocolCloseoutResumePacket(input: {
         preservedRouteImpact: merged.initialRouteImpactPreserved
           ? merged.closeoutPacket?.route_impact
           : null,
+        // The resume contract tells the Attempt to cite the workspace packet it
+        // just wrote; a packet cannot carry an independent digest of itself, so
+        // the declared value is a self-assertion, not a trust anchor. Bind the
+        // digest of the stable bytes actually observed instead.
+        identityPolicy: 'bind_observed',
       });
   return {
     closeoutPacket: hydrated.closeoutPacket,

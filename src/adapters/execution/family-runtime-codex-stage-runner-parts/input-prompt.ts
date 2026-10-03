@@ -422,6 +422,7 @@ function qualityAttemptPromptLines(
         ]
       : [
           'Initial Review must assign stable finding_id, severity, evidence_refs, required status, and repair_expectation.',
+          'Each finding evidence_refs must be a non-empty array of non-empty string refs naming evidence actually reviewed in the immutable snapshot. Cite a snapshot locator as its ref string; do not emit the manifest exact-ref object in place of the string.',
           'For a non-hard-stop reviewer outcome, required route_impact.stage_quality_cycle fields are outcome and findings.',
           'For outcome=blocked or outcome=human_gate, return only outcome plus the required hard-stop evidence; do not fabricate findings.',
           'Do not produce a repair_map. The repairer creates that map against the accepted findings in a separate fresh Attempt.',
@@ -519,7 +520,7 @@ export function protocolCloseoutResumePrompt(attempt: JsonRecord, persistedOutpu
       JSON.stringify({ ref: persistedOutput.output_ref, sha256: persistedOutput.sha256, size_bytes: persistedOutput.size_bytes }),
       'You may cite this produced output in closeout_refs and closeout_ref_metadata. It is transport evidence only, not an owner receipt or an approved quality verdict. Preserve your original review findings and semantic route; do not treat persistence as quality acceptance.',
     ] : []),
-    'If this Attempt already wrote its complete typed closeout packet and the first response only referenced it in prose, include exactly one closeout_ref_metadata entry with kind "stage_attempt_closeout_packet", its local workspace ref, exact sha256, and exact size_bytes when known. OPL may hydrate only that exact workspace-bound packet after stable byte and Attempt-identity verification.',
+    'If this Attempt already wrote its complete typed closeout packet and the first response only referenced it in prose, include exactly one closeout_ref_metadata entry with kind "stage_attempt_closeout_packet" and its local workspace ref. OPL verifies and binds the stable bytes it observes at that ref and does not require you to declare a digest of that packet: a closeout packet cannot contain an independent hash of itself. Include sha256 and size_bytes only if you already know them exactly; never rewrite the file to make a guessed value correct.',
     'closeout_ref_metadata objects may contain only ref_kind, kind, uri, sha256, ref, size_bytes, and artifact_identity_receipt_ref.',
     'Never output typed_closeout_ref_metadata or any renamed closeout field.',
   ].join('\n');

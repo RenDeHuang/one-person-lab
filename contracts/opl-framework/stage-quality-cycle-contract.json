@@ -490,6 +490,13 @@
     }
   },
   "finding_closure_contract": {
+    "ref_normalization": {
+      "accepted_input_forms": ["non_empty_locator_string", "object_with_non_empty_ref"],
+      "normalized_form": "locator_string",
+      "evidence_refs_must_be_non_empty": true,
+      "changed_artifact_refs_may_be_empty": true,
+      "citation_metadata_is_not_an_artifact_identity_receipt": true
+    },
     "initial_outcome_consistency": {
       "repair_required_requires_at_least_one_required_finding": true,
       "pass_forbids_open_required_findings": true,

@@ -82,6 +82,25 @@ function stringList(value: unknown) {
     : [];
 }
 
+// Route evidence is authored by Codex Attempts, and the Stage contract points those Attempts at
+// locators the framework itself publishes as objects (`members[].immutable_ref` is an exact ref:
+// `{kind, ref, size_bytes, sha256}`). A faithful citation therefore arrives either as the locator
+// string or as that object. `stringList` silently dropped the object form, which made a
+// substantive cross-Stage route_back decision non-authoritative and discarded without any error.
+// Accept the exact-ref shape here and keep everything else fail-closed.
+function evidenceRefList(value: unknown) {
+  return Array.isArray(value)
+    ? [...new Set(value.map((entry) => {
+        if (typeof entry === 'string') return entry.trim();
+        if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+          const ref = (entry as Record<string, unknown>).ref;
+          if (typeof ref === 'string' && ref.trim()) return ref.trim();
+        }
+        return '';
+      }).filter((entry) => entry.length > 0))]
+    : [];
+}
+
 function contextManifest(attempt: JsonRecord) {
   const direct = record(attempt.context_manifest);
   if (Object.keys(direct).length > 0) return direct;
@@ -171,7 +190,7 @@ function normalizeSelection(input: {
   } else if (!input.declaredStageIds.includes(targetStageId)) {
     rejectionReasons.push('route_target_is_not_a_declared_stage');
   }
-  const evidenceRefs = stringList(value.evidence_refs);
+  const evidenceRefs = evidenceRefList(value.evidence_refs);
   if (evidenceRefs.length === 0) rejectionReasons.push('route_selection_requires_evidence_refs');
   const reason = text(value.reason);
   if (input.recommendation && !reason) rejectionReasons.push('route_recommendation_requires_reason');

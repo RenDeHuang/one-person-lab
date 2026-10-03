@@ -331,8 +331,12 @@
       "local_workspace_file_only": true,
       "regular_stable_file_required": true,
       "canonical_sha256_required": true,
-      "declared_size_when_present_must_match": true,
+      "identity_policy": "bind_observed",
+      "declared_sha256_required": false,
+      "declared_size_when_present_must_match": false,
+      "observed_sha256_bound_into_transport_metadata": true,
       "observed_size_bound_into_transport_metadata": true,
+      "recovery_identity_policy": "verify_declared",
       "stage_attempt_id_required_and_exact": true,
       "explicit_field_conflict_policy": "fail_closed",
       "arbitrary_closeout_ref_hydration_forbidden": true
