@@ -9,6 +9,11 @@ function evidenceWorklistUsage() {
   return `opl family-runtime ${EVIDENCE_WORKLIST_COMMAND} --family-defaults --provider temporal --executor-kind codex_cli [--detail summary|full] [--full]`;
 }
 
+import type { DomainManifestCatalog } from '../../../kernel/domain-manifest-port.ts';
+import type { CordisOwnerDeltaObserverService } from '../../../authority/evidence/index.ts';
+import type { RuntimeTraySnapshotProvider } from '../runtime-tray-snapshot-provider.ts';
+import { runFamilyRuntimeEvidenceWorklistCommand } from '../family-runtime-evidence-worklist-command.ts';
+
 export function parseEvidenceWorklistArgs(rest: string[]): FamilyRuntimeCommandInput {
   if (rest[0] !== EVIDENCE_WORKLIST_COMMAND) {
     throw new FrameworkContractError('unknown_command', `Unknown family-runtime subcommand: ${rest[0]}.`, {
@@ -76,4 +81,40 @@ export function parseEvidenceWorklistArgs(rest: string[]): FamilyRuntimeCommandI
       detailLevel,
     },
   };
+}
+
+
+export async function runFamilyRuntimeEvidenceWorklist(
+  context: {
+    parsed: FamilyRuntimeCommandInput;
+    stageReplayMissingReceiptExtraReceipts?: Parameters<
+      typeof runFamilyRuntimeEvidenceWorklistCommand
+    >[0]['stageReplayMissingReceiptExtraReceipts'];
+    runtimeSnapshotProvider?: RuntimeTraySnapshotProvider;
+    ownerDeltaObserver?: CordisOwnerDeltaObserverService;
+    domainManifests?: DomainManifestCatalog;
+  },
+): Promise<Record<string, unknown>> {
+  const {
+    parsed,
+    stageReplayMissingReceiptExtraReceipts,
+    runtimeSnapshotProvider,
+    ownerDeltaObserver,
+    domainManifests,
+  } = context;
+  if (parsed.mode === 'evidence_worklist') {
+    const evidenceWorklistInput =
+      stageReplayMissingReceiptExtraReceipts
+        ? {
+            ...parsed.input,
+            stageReplayMissingReceiptExtraReceipts: stageReplayMissingReceiptExtraReceipts,
+          }
+        : parsed.input;
+    return runFamilyRuntimeEvidenceWorklistCommand(evidenceWorklistInput, {
+      runtimeSnapshotProvider: runtimeSnapshotProvider,
+      ownerDeltaObserver: ownerDeltaObserver,
+      ...(domainManifests ? { domainManifests } : {}),
+    });
+  }
+  throw new Error(`Unhandled family runtime evidence mode: ${(parsed as { mode: string }).mode}`);
 }
