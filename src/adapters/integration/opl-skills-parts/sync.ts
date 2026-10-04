@@ -15,6 +15,7 @@ import {
   writeJsonPayloadFile,
 } from '../../../kernel/json-file.ts';
 import { PACKAGED_MODULE_MARKER_FILE } from '../packaged-module-marker.ts';
+import { normalizeOptionalString } from './paths.ts';
 import type {
   InspectFamilySkillPack,
   SkillPackSyncScope,
@@ -66,6 +67,61 @@ const SCHOLARSKILLS_EXCLUDED_ROOTS = [
   'gallery/**/*.layout.json',
   'gallery/**/*.lock',
 ];
+
+export function resolveSkillSyncTargetRoot(
+  scope: SkillPackSyncScope,
+  options: {
+    targetWorkspace?: string;
+    targetQuest?: string;
+    targetRoot?: string;
+  },
+) {
+  if (scope === 'workspace') {
+    return normalizeOptionalString(options.targetWorkspace)
+      ?? normalizeOptionalString(options.targetRoot)
+      ?? null;
+  }
+  if (scope === 'quest') {
+    return normalizeOptionalString(options.targetQuest)
+      ?? normalizeOptionalString(options.targetRoot)
+      ?? null;
+  }
+  return normalizeOptionalString(options.targetRoot);
+}
+
+export function requireSkillSyncTargetRoot(
+  scope: SkillPackSyncScope,
+  targetRoot: string | null,
+) {
+  if ((scope === 'workspace' || scope === 'quest') && !targetRoot) {
+    throw new FrameworkContractError(
+      'cli_usage_error',
+      `ScholarSkills ${scope} skill sync requires a target root.`,
+      {
+        requested_scope: scope,
+        required: scope === 'workspace'
+          ? ['--target-workspace <path> or --target-root <path>']
+          : ['--target-quest <path> or --target-root <path>'],
+      },
+    );
+  }
+}
+
+export function shouldSkipImplicitCapabilitySkillSync(
+  inspected: InspectFamilySkillPack,
+  options: {
+    scope?: SkillPackSyncScope;
+    targetWorkspace?: string;
+    targetQuest?: string;
+    targetRoot?: string;
+  },
+) {
+  return inspected.skill_sync_policy.implicit_without_target === 'skip'
+    && !options.scope
+    && !normalizeOptionalString(options.targetWorkspace)
+    && !normalizeOptionalString(options.targetQuest)
+    && !normalizeOptionalString(options.targetRoot);
+}
 
 function resolveHome(home?: string) {
   return home ? path.resolve(home) : (process.env.HOME ?? null);
