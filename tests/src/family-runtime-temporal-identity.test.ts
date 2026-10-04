@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 
 import { createWorkItemExecutionScopeSnapshot } from '../../src/authority/workspace/execution-scope.ts';
@@ -13,6 +14,7 @@ import {
   buildTemporalStageAttemptSearchAttributes,
 } from '../../src/adapters/execution/family-runtime-temporal-visibility.ts';
 import { codexStageAttemptEnv } from '../../src/adapters/execution/family-runtime-codex-stage-runner-parts/provider-env.ts';
+import { __testing as domainPythonTesting } from '../../src/adapters/execution/family-runtime-codex-stage-runner-parts/domain-python-env.ts';
 import {
   normalizeTypedStageCloseoutPacket,
   validateCloseoutPacketForAttempt,
@@ -285,4 +287,19 @@ test('workspace locator scope cannot replace missing direct runtime authority', 
     domainId: executionScope.domain_id,
     operation: 'test_transport_only_scope',
   }), (error: unknown) => code(error) === 'execution_scope_transport_without_authority');
+});
+
+test('Codex stage environment injects domain pack and framework Python import roots', () => {
+  fs.mkdirSync('/tmp/dm-runtime-test/domain-pack/src', { recursive: true });
+  const attemptRecord = attempt() as unknown as Record<string, unknown>;
+  attemptRecord.workspace_locator = {
+    ...(attemptRecord.workspace_locator as Record<string, unknown>),
+    domain_pack_root: '/tmp/dm-runtime-test/domain-pack',
+  };
+  const env = codexStageAttemptEnv({ attempt: attemptRecord, workspaceRoot: '/tmp/dm-runtime-test' });
+  const pythonPathEntries = (env.PYTHONPATH ?? '').split(':');
+  assert.equal(pythonPathEntries[0], '/tmp/dm-runtime-test/domain-pack/src');
+  assert.equal(pythonPathEntries[1], domainPythonTesting.FRAMEWORK_PYTHON_ROOT);
+  assert.ok(fs.existsSync(path.join(pythonPathEntries[1] as string, 'opl_framework')));
+  assert.equal(env.PYTHONDONTWRITEBYTECODE, '1');
 });
