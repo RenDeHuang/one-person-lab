@@ -1,3 +1,4 @@
+import { FrameworkContractError } from '../../../src/kernel/contract-validation.ts';
 import {
   assert,
   crypto,
@@ -341,6 +342,138 @@ test('controller route materialization starts targets, replays idempotently, and
   } finally {
     db.close();
     fs.rmSync(routeCurrentPackRoot, { recursive: true, force: true });
+  }
+});
+
+test('a controller route target StageRun binds the target Stage own declared action', async () => {
+  const db = new DatabaseSync(':memory:');
+  const parent = stageRunInput({
+    invocationId: 'sri_action_binding_parent',
+    stageId: 'intake',
+    routeBudget: { max_route_back_rounds: 3, route_back_rounds_used: 0 },
+  });
+  // A pack that registers one single-Stage action per Stage (the MAS shape). The
+  // parent action `draft-paper` declares only `intake`; the target Stage `draft`
+  // is declared by its own action `draft-artifact`.
+  const routePackRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-route-action-pack-'));
+  fs.cpSync(domainPackRoot, routePackRoot, { recursive: true });
+  writeFixture(routePackRoot, 'contracts/input.schema.json', '{}\n');
+  writeFixture(routePackRoot, 'contracts/output.schema.json', '{}\n');
+  const action = (actionId: string, stageId: string) => ({
+    action_id: actionId,
+    title: actionId,
+    summary: actionId,
+    owner: 'medautoscience',
+    effect: 'mutating',
+    execution_binding: { kind: 'stage_binding', stage_manifest_ref: 'agent/stages/manifest.json' },
+    input_schema_ref: 'contracts/input.schema.json',
+    output_schema_ref: 'contracts/output.schema.json',
+    required_fields: ['workspace_root'],
+    optional_fields: [],
+    workspace_locator_fields: ['workspace_root'],
+    human_gate_ids: [],
+    stage_route: {
+      entry_stage_ref: stageId,
+      required_stage_refs: [stageId],
+      optional_stage_refs: [],
+      terminal_stage_refs: [stageId],
+      route_policy: 'ai_selected_progress_route',
+    },
+    supported_surfaces: {
+      cli: { surface_kind: 'domain_cli' },
+      mcp: { tool_name: `mas_${actionId}`, surface_kind: 'domain_mcp' },
+      skill: { command_contract_id: `mas.${actionId}`, surface_kind: 'domain_skill' },
+      product_entry: { action_key: actionId, surface_kind: 'domain_product_entry' },
+      openai: { tool_name: `mas_${actionId}` },
+      ai_sdk: { tool_name: `mas_${actionId}` },
+    },
+    authority_boundary: {},
+  });
+  writeFixture(routePackRoot, 'contracts/action_catalog.json', `${JSON.stringify({
+    surface_kind: 'family_action_catalog',
+    version: 'family-action-catalog.v2',
+    catalog_id: 'mas_actions',
+    target_domain_id: 'medautoscience',
+    owner: 'medautoscience',
+    authority_boundary: {
+      domain_truth_owner: 'medautoscience',
+      opl_role: 'projection_consumer_only',
+      write_policy: 'no_domain_truth_writes',
+    },
+    actions: [action('draft-paper', 'intake'), action('draft-artifact', 'draft')],
+    notes: [],
+  })}\n`);
+  const launchedInputs: ReturnType<typeof stageRunInput>[] = [];
+  const dependencies = {
+    findTargetStageRun: (stageRunId: string) => findStageRunLaunch(db, stageRunId)?.stage_run_input ?? null,
+    ensurePackageLaunchReady: async () => ({
+      launch_allowed: true,
+      runtime_source_readiness: {
+        status: 'current',
+        operational_ready: true,
+        checkout_path: routePackRoot,
+      },
+      configured_carrier: {
+        status: 'installed',
+        executor: { status: 'callable' },
+        plugin_source_path: routePackRoot,
+      },
+      package_use_binding: packageUseBinding({ targetRoot: routePackRoot }),
+    }) as any,
+    resolveStageBinding: (_root: string, stageId: string) => binding(stageId, ['agent/sources/request.md']),
+    launchTargetStageRun: async (target: ReturnType<typeof stageRunInput>) => {
+      launchedInputs.push(target);
+      return await launchRegisteredStageRun({
+        db,
+        stageRunInput: target,
+        start: true,
+        startWorkflow: async () => temporalStartReceipt(target),
+      });
+    },
+  };
+  try {
+    const routeInput = {
+      parent_stage_run: parent,
+      decisive_attempt_ref: 'opl://stage_attempts/reviewer-action-binding',
+      decisive_execution_content_binding: decisiveExecutionBinding(parent),
+      decision: {
+        decision_kind: 'advance',
+        target_stage_id: 'draft',
+        evidence_refs: ['artifact:a'],
+      },
+      artifact_refs: [artifactFixtures.a!.ref],
+      artifact_hashes: [artifactFixtures.a!.sha256],
+      artifact_identity_receipt_refs: [],
+    } as Parameters<typeof materializeStageRunRoute>[0];
+    const receipt = await materializeStageRunRoute(routeInput, dependencies);
+    assert.equal(receipt.materialization_status, 'launched');
+    const target = launchedInputs.at(-1)!;
+    assert.equal(target.stage_id, 'draft');
+    // The target StageRun must carry the target Stage own action, not the parent's.
+    assert.equal(target.action_id, 'draft-artifact');
+    assert.notEqual(target.action_id, parent.action_id);
+    const replay = await materializeStageRunRoute(routeInput, dependencies);
+    assert.equal(replay.materialization_status, 'existing');
+    assert.equal(replay.target_stage_run_id, receipt.target_stage_run_id);
+
+    const catalogPath = path.join(routePackRoot, 'contracts/action_catalog.json');
+    const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
+    catalog.actions[0].stage_route.required_stage_refs.push('draft');
+    fs.writeFileSync(catalogPath, JSON.stringify(catalog));
+    await materializeStageRunRoute({ ...routeInput, decisive_attempt_ref: 'artifact:multi-stage-action' }, dependencies);
+    assert.equal(launchedInputs.at(-1)!.action_id, parent.action_id);
+
+    catalog.actions[0].stage_route.required_stage_refs = ['intake'];
+    catalog.actions.push(action('another-draft', 'draft'));
+    fs.writeFileSync(catalogPath, JSON.stringify(catalog));
+    await assert.rejects(
+      materializeStageRunRoute({ ...routeInput, decisive_attempt_ref: 'artifact:ambiguous-action' }, dependencies),
+      (error: unknown) => error instanceof FrameworkContractError
+        && error.details?.failure_code === 'route_target_action_binding_ambiguous',
+    );
+  } finally {
+    db.close();
+    fs.rmSync(routePackRoot, { recursive: true, force: true });
   }
 });
 

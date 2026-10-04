@@ -886,6 +886,85 @@ test('route launch requires fresh active lifecycle on first launch and persisted
       false,
     );
 
+    // A controller-bound target whose parent Stage declares no review lane is ordinary
+    // quality debt, not a route conflict: the consolidated review Stage owns no review
+    // transport, so route_back into a controller-bound manuscript Stage must still
+    // materialize (with the lane omitted) so the repair round can run.
+    const laneLessParent = buildPackBoundTemporalStageRunInput({
+      binding: binding('intake'),
+      domainPackRoot: checkoutRoot,
+      domainId: 'mas',
+      stageId: 'intake',
+      stageRunInvocationId: 'sri_lifecycle_route_lane_parent_no_lane',
+      workspaceLocator: {
+        workspace_root: workspaceRoot,
+        study_id: 'study-001',
+        domain_pack_root: checkoutRoot,
+        package_use_binding: packageUseBinding(),
+      },
+      sourceFingerprint: artifactSha256,
+      executorKind: 'codex_cli',
+      stageAttemptExecutorPolicy: { invocation_mode: 'invocation' },
+      actionId: 'launch_stage',
+      artifactRefs: ['artifacts/request.json'],
+      artifactHashes: [artifactSha256],
+    });
+    const laneLessDecisivePayload = {
+      parent_stage_run_spec_sha256: laneLessParent.stage_run_spec_sha256,
+      use_boundary_id: 'package-use:lifecycle-route-lane-no-lane',
+      spec_sha256: stageRunSpecSha256(laneLessParent.stage_run_spec),
+      spec: laneLessParent.stage_run_spec,
+      declared_stage_ids: laneLessParent.declared_stage_ids,
+    };
+    let laneLessTarget: ReturnType<typeof buildPackBoundTemporalStageRunInput> | null = null;
+    let laneLessStarts = 0;
+    const laneLessResult = await materializeStageRunRoute({
+      parent_stage_run: laneLessParent,
+      decisive_attempt_ref: 'opl://stage_attempts/lifecycle-route-lane-no-lane',
+      decisive_execution_content_binding: {
+        surface_kind: 'opl_stage_attempt_execution_content_binding' as const,
+        version: 'opl-stage-attempt-execution-content-binding.v1' as const,
+        ...laneLessDecisivePayload,
+        binding_sha256: stageAttemptExecutionContentBindingSha256(laneLessDecisivePayload),
+      },
+      decision: {
+        decision_kind: 'route_back' as const,
+        target_stage_id: 'draft',
+        evidence_refs: ['artifact:request'],
+      },
+      artifact_refs: ['artifacts/request.json'],
+      artifact_hashes: [artifactSha256],
+      artifact_identity_receipt_refs: [],
+    }, {
+      findTargetStageRun: () => laneLessTarget,
+      ensurePackageLaunchReady: async () => ({
+        runtime_source_readiness: { checkout_path: checkoutRoot },
+        ...nativeCarrierReadiness(checkoutRoot),
+        package_use_binding: packageUseBinding(),
+      }) as never,
+      resolveStageBinding: (_root: string, stageId: string) => (
+        stageId === 'draft' ? binding(stageId, controllerLane(['medical', 'display'])) : binding(stageId)
+      ),
+      launchTargetStageRun: async (target) => {
+        laneLessStarts += 1;
+        const existing = laneLessTarget !== null;
+        laneLessTarget ??= target;
+        return { start_status: existing ? 'existing' : 'started' };
+      },
+    });
+    assert.equal(laneLessResult.materialization_status, 'launched');
+    assert.equal(laneLessStarts, 1);
+    const laneLessLaunchTarget = laneLessTarget as unknown as ReturnType<
+      typeof buildPackBoundTemporalStageRunInput
+    > | null;
+    assert.equal(
+      Object.hasOwn(
+        laneLessLaunchTarget?.stage_run_spec.stage_attempt_executor_policy ?? {},
+        'review_lane_binding',
+      ),
+      false,
+    );
+
     const rootDrift = laneRoute('medical', controllerLane(['medical']), 'root-drift');
     const rootDriftRoots: string[] = [];
     let rootDriftTarget: ReturnType<typeof buildPackBoundTemporalStageRunInput> | null = null;

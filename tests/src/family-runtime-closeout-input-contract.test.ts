@@ -44,3 +44,34 @@ test('Temporal history preserves protocol resume failure separately from success
   assert.equal(history.process_output_summary?.exit_code,0);
   assert.deepEqual(history.process_output_summary?.protocol_closeout_resume,protocol);
 });
+
+test('closeout consumed/writeback ref lists accept the published exact ref shape and fail closed', async () => {
+  const { normalizeTypedStageCloseoutPacket } = await import(
+    '../../src/adapters/execution/family-runtime-codex-stage-runner-parts/closeout-normalization.ts'
+  );
+  const exactRef = {
+    kind: 'opl_reviewer_input_snapshot_member',
+    ref: 'file:///workspace/studies/demo/artifacts/manuscript_canonical.md',
+    size_bytes: 20888,
+    sha256: 'sha256:5bc7d772a55862c89dbeb4e1ee24d8a64cab80dd701d306086e514e8ac08829d',
+  };
+  const packet = (value: Record<string, unknown>) => normalizeTypedStageCloseoutPacket({
+    surface_kind: 'stage_attempt_closeout_packet',
+    closeout_refs: [exactRef.ref],
+    ...value,
+  });
+  const normalized = packet({
+    consumed_refs: [exactRef],
+    consumed_memory_refs: [exactRef.ref],
+    writeback_receipt_refs: [exactRef],
+    usage_refs: [exactRef],
+  });
+  assert.deepEqual(normalized.consumed_refs, [exactRef.ref]);
+  assert.deepEqual(normalized.consumed_memory_refs, [exactRef.ref]);
+  assert.deepEqual(normalized.writeback_receipt_refs, [exactRef.ref]);
+  assert.deepEqual(normalized.usage_refs, [exactRef.ref]);
+  // Absent stays absent, and a genuinely malformed entry is rejected rather than dropped.
+  assert.deepEqual(packet({}).consumed_refs, []);
+  assert.throws(() => packet({ consumed_refs: [{}] }));
+  assert.throws(() => packet({ writeback_receipt_refs: [42] }));
+});

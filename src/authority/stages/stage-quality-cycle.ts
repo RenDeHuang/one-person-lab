@@ -310,19 +310,26 @@ export function stageQualityAttemptOutcomeFromEnvelope(input: {
   return null;
 }
 
+function optionalAgentRefList(value: unknown, field: string) {
+  // Optional agent-authored ref list: absent or empty stays empty, present entries accept the
+  // locator string or the exact-ref object shape, and any other entry fails closed rather than
+  // being silently dropped.
+  if (value === undefined || value === null) return [] as string[];
+  const entries = Array.isArray(value) ? value : [value];
+  if (entries.length === 0) return [] as string[];
+  return evidenceRefStrings(entries, field);
+}
+
 function optionalEnvelopeRefs(
   envelope: Record<string, unknown>,
   singularField: string,
   pluralField: string,
 ) {
-  const singularValue = envelope[singularField];
-  const singular = typeof singularValue === 'string' && singularValue.trim()
-    ? [singularValue.trim()]
-    : [];
-  const plural = Array.isArray(envelope[pluralField])
-    ? envelope[pluralField].filter((entry): entry is string => typeof entry === 'string' && Boolean(entry.trim()))
-      .map((entry) => entry.trim())
-    : [];
+  // The plural field is an agent-authored ref list (locator strings or exact-ref objects); the
+  // singular field accepts one such ref. Filtering non-strings out silently used to surface as
+  // a misleading "requires a typed blocker ref" error even when the Attempt had cited one.
+  const singular = optionalAgentRefList(envelope[singularField], singularField);
+  const plural = optionalAgentRefList(envelope[pluralField], pluralField);
   return [...new Set([...singular, ...plural])];
 }
 

@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 import { canonicalJsonText } from '../../kernel/canonical-json.ts';
 import { FrameworkContractError, isRecord } from '../../kernel/contract-validation.ts';
 import type { StandardAgentStageQualityRuntimeBinding } from '../../authority/packages/index.ts';
@@ -7,6 +10,7 @@ import {
   stageAttemptExecutorPolicyWithReviewLane,
 } from '../../authority/packages/index.ts';
 import { buildPackBoundTemporalStageRunInput } from './family-runtime-pack-bound-stage-run.ts';
+import { readHostedAgentRuntimeActionContracts } from './hosted-agent-runtime-binding.ts';
 import {
   ensureFamilyRuntimePackageLaunchReady,
   packageRuntimeSourceCheckoutPath,
@@ -80,6 +84,7 @@ function routeReplayBusinessIdentity(input: TemporalStageRunWorkflowInput) {
 function expectedRouteReplayBusinessIdentity(input: {
   parentStageRun: TemporalStageRunWorkflowInput;
   targetStageId: string;
+  domainPackRoot: string;
   parentRouteDecisionRef: string;
   stageAttemptExecutorPolicy: Record<string, unknown> | null;
   artifactRefs: string[];
@@ -94,7 +99,11 @@ function expectedRouteReplayBusinessIdentity(input: {
     execution_scope: input.parentStageRun.execution_scope ?? null,
     domain_id: parentSpec.domain_id,
     stage_id: input.targetStageId,
-    action_id: parentSpec.action_id,
+    action_id: resolveRouteTargetActionId({
+      domainPackRoot: input.domainPackRoot,
+      targetStageId: input.targetStageId,
+      parentActionId: parentSpec.action_id,
+    }),
     task_id: parentSpec.task_id,
     workspace_identity: parentSpec.workspace_identity,
     source_fingerprint: parentSpec.source_fingerprint,
@@ -161,7 +170,17 @@ function resolveRouteTargetReviewLane(input: {
   if (binding.binding_kind === 'fixed') {
     return resolveStandardAgentStageReviewLane(binding, null);
   }
-  if (!input.parentReviewLane || !binding.allowed_review_lanes.includes(input.parentReviewLane)) {
+  // A controller-bound Stage declares which parent lane it may inherit. The parent
+  // Stage may itself declare no review lane (for example a consolidated
+  // review-and-quality Stage that owns no review transport). The target pack declares
+  // `missing_binding_effect=quality_debt_without_quality_or_readiness_claim` for that
+  // case, and this resolver's own fixed/pack binding accepts a null request, so an
+  // absent parent lane is ordinary quality debt: the route target proceeds without a
+  // lane binding instead of hard-failing the whole route materialization. Only a
+  // present parent lane outside the declared set is a genuine conflict and stays
+  // fail-closed.
+  if (!input.parentReviewLane) return null;
+  if (!binding.allowed_review_lanes.includes(input.parentReviewLane)) {
     throw new FrameworkContractError(
       'contract_shape_invalid',
       'A controller-bound Stage route target can inherit only an allowed parent review lane.',
@@ -174,6 +193,57 @@ function resolveRouteTargetReviewLane(input: {
     );
   }
   return input.parentReviewLane;
+}
+
+// A controller-materialized route target StageRun must carry the action identity that
+// declares the target Stage, not the parent Stage's action. A pack registers one
+// stage-bound action per Stage; a cross-stage route target therefore belongs to the
+// target Stage's own action. The parent action identity is a valid fallback only when
+// the target pack does not declare a stage-bound action for the target Stage (for
+// example a controller- or host-owned Stage), in which case lifecycle admission is
+// not applicable and any retained action id is inert.
+function actionContainsStage(
+  action: Awaited<ReturnType<typeof readHostedAgentRuntimeActionContracts>>['catalog']['actions'][number],
+  stageId: string,
+) {
+  if (action.execution_binding.kind !== 'stage_binding' || !action.stage_route) return false;
+  return new Set([
+    action.stage_route.entry_stage_ref,
+    ...action.stage_route.required_stage_refs,
+    ...action.stage_route.optional_stage_refs,
+    ...action.stage_route.terminal_stage_refs,
+  ]).has(stageId);
+}
+
+function resolveRouteTargetActionId(input: {
+  domainPackRoot: string;
+  targetStageId: string;
+  parentActionId: string | null | undefined;
+}) {
+  const actionCatalogPath = path.join(input.domainPackRoot, 'contracts', 'action_catalog.json');
+  // A domain pack that declares no action catalog is not an authoritative Standard
+  // Agent pack: the target StageRun keeps the parent action identity, exactly as
+  // before this resolver existed, and lifecycle admission is not applicable.
+  if (!fs.existsSync(actionCatalogPath)) return input.parentActionId ?? null;
+  // Once the pack DOES declare a catalog, a read/validation failure must fail loud
+  // rather than silently fall back to the parent Stage action. A silent fallback
+  // would bind the target StageRun to the parent Stage action and later surface as
+  // a misleading domain_lifecycle_stage_launch_blocked at admission time.
+  const actions = readHostedAgentRuntimeActionContracts(input.domainPackRoot).catalog.actions;
+  const candidates = actions.filter((action) => actionContainsStage(action, input.targetStageId));
+  // Preserve an already valid multi-Stage action instead of changing its business identity.
+  const parent = candidates.find((action) => action.action_id === input.parentActionId);
+  if (parent) return parent.action_id;
+  const entryActions = candidates.filter((action) => action.stage_route?.entry_stage_ref === input.targetStageId);
+  const targets = entryActions.length > 0 ? entryActions : candidates;
+  if (targets.length > 1) {
+    throw new FrameworkContractError('contract_shape_invalid', 'Stage route target action is ambiguous.', {
+      failure_code: 'route_target_action_binding_ambiguous',
+      target_stage_id: input.targetStageId,
+      action_ids: targets.map((action) => action.action_id),
+    });
+  }
+  return targets[0]?.action_id ?? input.parentActionId ?? null;
 }
 
 function resolveRouteTargetLaunchPlan(input: {
@@ -368,6 +438,7 @@ export async function materializeStageRunRoute(
     const expectedReplayIdentity = expectedRouteReplayBusinessIdentity({
       parentStageRun,
       targetStageId,
+      domainPackRoot: persisted.domain_pack_root,
       parentRouteDecisionRef: invocation.parent_route_decision_ref,
       stageAttemptExecutorPolicy: targetPlan.targetStageAttemptExecutorPolicy,
       artifactRefs: input.artifact_refs,
@@ -482,7 +553,11 @@ export async function materializeStageRunRoute(
     artifactHashes: input.artifact_hashes,
     artifactIdentityReceiptRefs: input.artifact_identity_receipt_refs,
     routeBudget: targetRouteBudget,
-    actionId: parentStageRun.action_id,
+    actionId: resolveRouteTargetActionId({
+      domainPackRoot,
+      targetStageId,
+      parentActionId: parentStageRun.action_id,
+    }),
     taskId: parentStageRun.task_id,
     scopeKind: parentStageRun.scope_kind,
     executionScope: parentStageRun.execution_scope,

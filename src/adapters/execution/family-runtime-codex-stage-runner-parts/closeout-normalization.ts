@@ -7,8 +7,8 @@ import {
 import { requireFamilyRuntimeIngressIdentity } from '../family-runtime-execution-scope.ts';
 import {
   isRecord,
+  readAgentRefList,
   readRecordList,
-  readStringList,
   type JsonRecord,
 } from './shared.ts';
 
@@ -313,15 +313,17 @@ export function normalizeTypedStageCloseoutPacket(value: unknown): TypedStageClo
           ],
         }
       : {}),
-    consumed_refs: readStringList(value.consumed_refs),
-    consumed_memory_refs: readStringList(value.consumed_memory_refs),
-    writeback_receipt_refs: readStringList(value.writeback_receipt_refs),
+    consumed_refs: readAgentRefList(value.consumed_refs, 'consumed_refs'),
+    consumed_memory_refs: readAgentRefList(value.consumed_memory_refs, 'consumed_memory_refs'),
+    writeback_receipt_refs: readAgentRefList(value.writeback_receipt_refs, 'writeback_receipt_refs'),
     rejected_writes: readRecordList(value.rejected_writes),
     ...(domainOutput ? { domain_output: domainOutput } : {}),
     next_owner: optionalString(value.next_owner),
     domain_ready_verdict: optionalString(value.domain_ready_verdict),
     ...(isRecord(value.token_usage) ? { token_usage: value.token_usage } : {}),
-    ...(readStringList(value.usage_refs).length > 0 ? { usage_refs: readStringList(value.usage_refs) } : {}),
+    ...(readAgentRefList(value.usage_refs, 'usage_refs').length > 0
+      ? { usage_refs: readAgentRefList(value.usage_refs, 'usage_refs') }
+      : {}),
     ...(isRecord(value.session_usage_refs) ? { session_usage_refs: value.session_usage_refs } : {}),
     ...(isRecord(value.cost_summary) ? { cost_summary: value.cost_summary } : {}),
     ...(isRecord(value.user_stage_log) ? { user_stage_log: value.user_stage_log } : {}),

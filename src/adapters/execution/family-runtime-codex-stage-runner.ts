@@ -84,7 +84,10 @@ import {
   normalizeTimeoutMs,
   type JsonRecord,
 } from './family-runtime-codex-stage-runner-parts/shared.ts';
-import { resolveProtocolCloseoutResumePacket } from './family-runtime-codex-stage-runner-parts/referenced-closeout-hydration.ts';
+import {
+  hydrateReferencedStageAttemptCloseout,
+  resolveProtocolCloseoutResumePacket,
+} from './family-runtime-codex-stage-runner-parts/referenced-closeout-hydration.ts';
 import { stringValue as optionalString } from '../../kernel/json-record.ts';
 import {
   hostAttemptSkillRuntime,
@@ -741,6 +744,39 @@ async function runCodexStageRunner(input: CodexStageRunnerInput): Promise<CodexS
   });
   closeoutPacket = validatedCloseout.closeoutPacket;
   closeoutRejection = validatedCloseout.rejection;
+  // A primary Attempt may emit its final packet as a self-referenced form: the
+  // inline message omits route_impact and names the complete workspace-bound
+  // closeout it already wrote. Hydration existed only on the protocol-resume
+  // branch, so a directly emitted self-referenced closeout lost route_impact.
+  // Hydrate it from that exact verified file so the StageRun controller can
+  // schedule independent Review. Fail closed on conflict by keeping the
+  // un-hydrated packet, which lets the existing review-outcome guard surface
+  // the blocked reason instead of swallowing it.
+  if (
+    closeoutPacket
+    && protocolCloseoutReferenceHydrationStatus === 'not_applicable'
+    && !isRecord(closeoutPacket.route_impact ?? undefined)
+  ) {
+    try {
+      const hydrated = hydrateReferencedStageAttemptCloseout({
+        resumedCloseout: closeoutPacket,
+        resumedCandidate: initialCloseoutCandidate,
+        attempt: input.attempt,
+        workspaceRoot,
+      });
+      if (hydrated.closeoutPacket) {
+        closeoutPacket = hydrated.closeoutPacket;
+        if (hydrated.status === 'hydrated') {
+          protocolCloseoutReferenceHydrationStatus = hydrated.status;
+          protocolCloseoutReferenceObservation = hydrated.observation;
+          protocolCloseoutResumeInitialRouteImpactPreserved = true;
+        }
+      }
+    } catch {
+      // Keep the un-hydrated packet so the review-outcome guard surfaces the
+      // transport-contract failure instead of discarding it here.
+    }
+  }
   if (protocolCloseoutResumeStatus !== 'not_applicable') {
     protocolCloseoutResumeStatus = protocolCloseoutResumeViolationKinds.size === 0
       && protocolCloseoutResumePacketObserved
