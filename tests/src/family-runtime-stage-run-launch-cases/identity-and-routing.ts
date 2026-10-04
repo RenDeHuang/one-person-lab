@@ -1,3 +1,4 @@
+import { FrameworkContractError } from '../../../src/kernel/contract-validation.ts';
 import {
   assert,
   crypto,
@@ -431,7 +432,7 @@ test('a controller route target StageRun binds the target Stage own declared act
     },
   };
   try {
-    const receipt = await materializeStageRunRoute({
+    const routeInput = {
       parent_stage_run: parent,
       decisive_attempt_ref: 'opl://stage_attempts/reviewer-action-binding',
       decisive_execution_content_binding: decisiveExecutionBinding(parent),
@@ -443,13 +444,33 @@ test('a controller route target StageRun binds the target Stage own declared act
       artifact_refs: [artifactFixtures.a!.ref],
       artifact_hashes: [artifactFixtures.a!.sha256],
       artifact_identity_receipt_refs: [],
-    }, dependencies);
+    } as Parameters<typeof materializeStageRunRoute>[0];
+    const receipt = await materializeStageRunRoute(routeInput, dependencies);
     assert.equal(receipt.materialization_status, 'launched');
     const target = launchedInputs.at(-1)!;
     assert.equal(target.stage_id, 'draft');
     // The target StageRun must carry the target Stage own action, not the parent's.
     assert.equal(target.action_id, 'draft-artifact');
     assert.notEqual(target.action_id, parent.action_id);
+    const replay = await materializeStageRunRoute(routeInput, dependencies);
+    assert.equal(replay.materialization_status, 'existing');
+    assert.equal(replay.target_stage_run_id, receipt.target_stage_run_id);
+
+    const catalogPath = path.join(routePackRoot, 'contracts/action_catalog.json');
+    const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
+    catalog.actions[0].stage_route.required_stage_refs.push('draft');
+    fs.writeFileSync(catalogPath, JSON.stringify(catalog));
+    await materializeStageRunRoute({ ...routeInput, decisive_attempt_ref: 'artifact:multi-stage-action' }, dependencies);
+    assert.equal(launchedInputs.at(-1)!.action_id, parent.action_id);
+
+    catalog.actions[0].stage_route.required_stage_refs = ['intake'];
+    catalog.actions.push(action('another-draft', 'draft'));
+    fs.writeFileSync(catalogPath, JSON.stringify(catalog));
+    await assert.rejects(
+      materializeStageRunRoute({ ...routeInput, decisive_attempt_ref: 'artifact:ambiguous-action' }, dependencies),
+      (error: unknown) => error instanceof FrameworkContractError
+        && error.details?.failure_code === 'route_target_action_binding_ambiguous',
+    );
   } finally {
     db.close();
     fs.rmSync(routePackRoot, { recursive: true, force: true });

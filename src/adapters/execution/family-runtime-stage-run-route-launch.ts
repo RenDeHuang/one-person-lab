@@ -84,6 +84,7 @@ function routeReplayBusinessIdentity(input: TemporalStageRunWorkflowInput) {
 function expectedRouteReplayBusinessIdentity(input: {
   parentStageRun: TemporalStageRunWorkflowInput;
   targetStageId: string;
+  domainPackRoot: string;
   parentRouteDecisionRef: string;
   stageAttemptExecutorPolicy: Record<string, unknown> | null;
   artifactRefs: string[];
@@ -99,7 +100,7 @@ function expectedRouteReplayBusinessIdentity(input: {
     domain_id: parentSpec.domain_id,
     stage_id: input.targetStageId,
     action_id: resolveRouteTargetActionId({
-      domainPackRoot: input.parentStageRun.domain_pack_root,
+      domainPackRoot: input.domainPackRoot,
       targetStageId: input.targetStageId,
       parentActionId: parentSpec.action_id,
     }),
@@ -229,11 +230,20 @@ function resolveRouteTargetActionId(input: {
   // would bind the target StageRun to the parent Stage action and later surface as
   // a misleading domain_lifecycle_stage_launch_blocked at admission time.
   const actions = readHostedAgentRuntimeActionContracts(input.domainPackRoot).catalog.actions;
-  const declaredActionId = actions
-    .filter((action) => actionContainsStage(action, input.targetStageId))
-    .map((action) => action.action_id)
-    .sort()[0];
-  return declaredActionId ?? input.parentActionId ?? null;
+  const candidates = actions.filter((action) => actionContainsStage(action, input.targetStageId));
+  // Preserve an already valid multi-Stage action instead of changing its business identity.
+  const parent = candidates.find((action) => action.action_id === input.parentActionId);
+  if (parent) return parent.action_id;
+  const entryActions = candidates.filter((action) => action.stage_route?.entry_stage_ref === input.targetStageId);
+  const targets = entryActions.length > 0 ? entryActions : candidates;
+  if (targets.length > 1) {
+    throw new FrameworkContractError('contract_shape_invalid', 'Stage route target action is ambiguous.', {
+      failure_code: 'route_target_action_binding_ambiguous',
+      target_stage_id: input.targetStageId,
+      action_ids: targets.map((action) => action.action_id),
+    });
+  }
+  return targets[0]?.action_id ?? input.parentActionId ?? null;
 }
 
 function resolveRouteTargetLaunchPlan(input: {
@@ -428,6 +438,7 @@ export async function materializeStageRunRoute(
     const expectedReplayIdentity = expectedRouteReplayBusinessIdentity({
       parentStageRun,
       targetStageId,
+      domainPackRoot: persisted.domain_pack_root,
       parentRouteDecisionRef: invocation.parent_route_decision_ref,
       stageAttemptExecutorPolicy: targetPlan.targetStageAttemptExecutorPolicy,
       artifactRefs: input.artifact_refs,

@@ -27,15 +27,17 @@ Runway 在启动 Temporal 前，先把 exact StageRun input 写入 `${OPL_STATE_
 
 若初次 reviewer 因 `codex_cli_provider_unavailable` 阻断且没有已接受语义 closeout，在外部配额或权限恢复后，可对原 reviewer 执行 `opl family-runtime stage-run recover-closeout <stage_run_id> --attempt <reviewer_attempt_id> --retry-reviewer`。入口要求它仍是当前质量链最后一次 Attempt，并核验同 StageRun 已完成 producer 的 artifact 字节身份；现有恢复控制器创建新的 reviewer Attempt，保留原阻断记录与已用语义修复轮数，不重新运行 producer、不新建 ActionRun。领域 review 文件中的 `pass` 不会被 Framework 推定为已接受 verdict；实际通过与后续 route 仍须由新的正式 Review 给出。human gate、后续已推进的质量链、不同 scope 或已变化 artifact 不可走此入口。
 
-Closeout 恢复接受完整 JSON 对象及完整 JSON 代码块，记录无法归一化的原因。`domain_output` 先验证四字段身份与 `closeout_refs` 绑定，再丢弃额外正文、状态和 verdict；台账只保存 refs-only 身份。原始输出在 Attempt 物化时同时核对 producing Stage，身份或物理路径边界失败仍然终止。Review lane 由 Stage 声明决定：没有绑定时忽略请求中的 lane 提示，有绑定时缺失或冲突仍拒绝。长会话的同线程 closeout 补交默认预算为 900 秒，且仍受 Activity 总时限约束。
+Closeout 恢复接受完整 JSON 对象及完整 JSON 代码块，记录无法归一化的原因。`domain_output` 先验证四字段身份与 `closeout_refs` 绑定，再丢弃额外正文、状态和 verdict；台账只保存 refs-only 身份。原始输出在 Attempt 物化时同时核对 producing Stage，身份或物理路径边界失败仍然终止。Review lane 由 Stage 声明决定：没有绑定时忽略请求中的 lane 提示，controller-required 目标缺少父 lane 时保留质量债并继续路由；已声明但不允许的父 lane 仍拒绝。长会话的同线程 closeout 补交默认预算为 900 秒，且仍受 Activity 总时限约束。
 
-同线程 protocol-resume 可以引用本 Attempt 工作区内已经写出的 closeout packet。该路径绑定稳定观测字节的 SHA-256 与长度，不要求 packet 声明自身的哈希；工作区包含性、文件稳定性、当前 Attempt 身份、packet 类型和显式字段冲突仍须核验。独立 recovery 路径继续严格核对已声明的 digest 和长度。两条路径都只恢复 transport 与原有语义输出，不把文件持久化当成领域验收。
+直接 closeout 与同线程 protocol-resume 均可以引用本 Attempt 工作区内已经写出的 closeout packet；直接 packet 缺失的 route_impact 从该已核验文件补全，显式字段冲突不被覆盖。该路径绑定稳定观测字节的 SHA-256 与长度，不要求 packet 声明自身的哈希；工作区包含性、文件稳定性、当前 Attempt 身份、packet 类型和显式字段冲突仍须核验。独立 recovery 路径继续严格核对已声明的 digest 和长度。两条路径都只恢复 transport 与原有语义输出，不把文件持久化当成领域验收。
 
 Finding、repair、closure 与跨 Stage route 的证据引用接受非空 locator 字符串或带非空 `ref` 的对象，归一化结果仍是字符串列表；引用对象中的其他元数据不能替代 artifact identity receipt。证据列表及其成员不能为空白。`changed_artifact_refs` 可为空，使未修复或被阻断的 repair 能如实声明没有产物变化。
 
 恢复身份推进须先精确观察原 Temporal Run 已终止，再通过原注册表 CAS 留存先前回执。尚未开始审查的同一已接受 producer 可追加快照成员，旧成员和 artifact identity 必须保留；不能换 lane、workspace、binding 或替换已审证据。运行中的不同恢复身份仍拒绝，新的 Temporal Run 不代表新的业务 StageRun，也不改写原终态。
 
 CLI 默认 invocation 是稳定幂等键；`--new-stage-run` 显式创建新 Run。Hosted action 用 action `run_id + action_run_ref` 建立 invocation。跨 Stage 路由用 parent StageRun、decisive Attempt ref、route decision digest 与 target Stage 建立 invocation，因此同一 route replay 复用目标 Run，后续新决定或 A → B → A route-back 会创建新 Run。
+
+目标 action 优先保留已声明该 Stage 的父 action，否则采用该 Stage 唯一的 entry action 或唯一包含它的 action；歧义拒绝，不能按字母顺序选择。route replay 使用持久目标的 pack 路径核对同一 action 身份。缺少 action catalog 的非标准 pack 保持既有父 action 行为。
 
 `complete` 只关闭当前 workflow，不启动目标 Run。其他通过 authority/ABI 校验的决定必须由 controller 实际注册并启动目标 StageRun；controller 不得把“记录了 route”冒充“transition 已物化”。
 
