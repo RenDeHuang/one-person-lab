@@ -49,6 +49,8 @@ export function codexStageAttemptEnv(input: {
   attempt: JsonRecord;
   stagePacketRef?: string | null;
   workspaceRoot: string;
+  env?: NodeJS.ProcessEnv;
+  domainPython?: boolean;
 }): Record<string, string | undefined> {
   const workspaceLocator = isRecord(input.attempt.workspace_locator) ? input.attempt.workspace_locator : {};
   const stageAttemptId = optionalString(input.attempt.stage_attempt_id);
@@ -122,6 +124,6 @@ export function codexStageAttemptEnv(input: {
     OPL_SOURCE_FINGERPRINT: sourceFingerprint ?? undefined,
     OPL_IDEMPOTENCY_KEY: idempotencyKey ?? undefined,
     OPL_STAGE_MANIFEST_REF: stageManifestRef ?? undefined,
-    ...domainPythonEnvironment({ attempt: input.attempt }),
+    ...(input.domainPython === false ? {} : domainPythonEnvironment({ attempt: input.attempt, env: input.env })),
   };
 }

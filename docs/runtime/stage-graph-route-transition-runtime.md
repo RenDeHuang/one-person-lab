@@ -41,6 +41,8 @@ CLI 默认 invocation 是稳定幂等键；`--new-stage-run` 显式创建新 Run
 
 `complete` 只关闭当前 workflow，不启动目标 Run。其他通过 authority/ABI 校验的决定必须由 controller 实际注册并启动目标 StageRun；controller 不得把“记录了 route”冒充“transition 已物化”。
 
+宿主 Codex 领域 Attempt 将 pack 的 `src/` 和 Framework 的 `python/` 注入 `PYTHONPATH`，保留既有导入路径。使用已配置解释器、已有 uv runtime 或宿主 Python，并实际核验 `python3` 满足 pack 声明的最低版本（未声明时至少 3.11）；缺失时给出可诊断错误，不自动安装或宣称领域能力就绪。非 Python pack 不改变环境。沙箱保持其原有 provisioner 环境，不投射宿主路径。
+
 ## Progress-first
 
 - 任意可读 artifact、部分草稿、失败尝试、阴性结果或已成功物化的 diagnostic 都是下一 stage 的输入。

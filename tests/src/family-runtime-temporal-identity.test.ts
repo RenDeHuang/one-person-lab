@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import { createWorkItemExecutionScopeSnapshot } from '../../src/authority/workspace/execution-scope.ts';
@@ -289,17 +291,40 @@ test('workspace locator scope cannot replace missing direct runtime authority', 
   }), (error: unknown) => code(error) === 'execution_scope_transport_without_authority');
 });
 
-test('Codex stage environment injects domain pack and framework Python import roots', () => {
-  fs.mkdirSync('/tmp/dm-runtime-test/domain-pack/src', { recursive: true });
-  const attemptRecord = attempt() as unknown as Record<string, unknown>;
-  attemptRecord.workspace_locator = {
-    ...(attemptRecord.workspace_locator as Record<string, unknown>),
-    domain_pack_root: '/tmp/dm-runtime-test/domain-pack',
-  };
-  const env = codexStageAttemptEnv({ attempt: attemptRecord, workspaceRoot: '/tmp/dm-runtime-test' });
-  const pythonPathEntries = (env.PYTHONPATH ?? '').split(':');
-  assert.equal(pythonPathEntries[0], '/tmp/dm-runtime-test/domain-pack/src');
-  assert.equal(pythonPathEntries[1], domainPythonTesting.FRAMEWORK_PYTHON_ROOT);
-  assert.ok(fs.existsSync(path.join(pythonPathEntries[1] as string, 'opl_framework')));
-  assert.equal(env.PYTHONDONTWRITEBYTECODE, '1');
+test('Codex domain child imports both owners and preserves inherited Python paths', () => {
+  const pack = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-domain-python-'));
+  try {
+    const source = path.join(pack, 'src');
+    fs.mkdirSync(source);
+    fs.writeFileSync(path.join(source, 'domain_probe.py'), 'from opl_framework import family_runtime_client\n');
+    fs.writeFileSync(path.join(pack, 'pyproject.toml'), '[project]\nrequires-python = ">=3.12"\n');
+    const record = { ...attempt(), domain_pack_root: pack };
+    const inherited = path.join(pack, 'extra');
+    const env = codexStageAttemptEnv({ attempt: record, workspaceRoot: pack,
+      env: { PYTHONPATH: inherited, OPL_DOMAIN_PYTHON_COMMAND: '', OPL_MANAGED_PYTHON: '' } });
+    assert.deepEqual(env.PYTHONPATH?.split(path.delimiter), [source, domainPythonTesting.FRAMEWORK_PYTHON_ROOT, inherited]);
+    const child = spawnSync('python3', ['-c', 'import domain_probe,json,sys; from opl_framework import family_runtime_client; print(json.dumps([domain_probe.__file__,family_runtime_client.__file__,list(sys.version_info[:2])]))'],
+      { env: { ...process.env, ...env }, encoding: 'utf8' });
+    assert.equal(child.status, 0, child.stderr);
+    const observed = JSON.parse(child.stdout);
+    assert.equal(observed[0], path.join(source, 'domain_probe.py'));
+    assert.ok(observed[1].startsWith(domainPythonTesting.FRAMEWORK_PYTHON_ROOT));
+    assert.ok(observed[2][0] > 3 || observed[2][1] >= 12);
+    assert.equal(fs.existsSync(path.join(source, '__pycache__')), false);
+    const sandbox = codexStageAttemptEnv({ attempt: record, workspaceRoot: pack, domainPython: false });
+    assert.equal(sandbox.PYTHONPATH, undefined);
+    assert.equal(sandbox.PATH, undefined);
+  } finally { fs.rmSync(pack, { recursive: true, force: true }); }
+});
+
+test('Domain Python leaves non-domain attempts unchanged and rejects an invalid configured interpreter', () => {
+  assert.equal(codexStageAttemptEnv({ attempt: attempt(), workspaceRoot: '/tmp/dm-runtime-test' }).PYTHONPATH, undefined);
+  const pack = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-domain-python-invalid-'));
+  try {
+    fs.mkdirSync(path.join(pack, 'src'));
+    assert.throws(() => codexStageAttemptEnv({ attempt: { ...attempt(), domain_pack_root: pack }, workspaceRoot: pack,
+      env: { OPL_DOMAIN_PYTHON_COMMAND: path.join(pack, 'missing-python') } }), /Configured domain Python/);
+    assert.throws(() => codexStageAttemptEnv({ attempt: { ...attempt(), domain_pack_root: pack }, workspaceRoot: pack,
+      env: { OPL_DOMAIN_PYTHON_COMMAND: '', OPL_MANAGED_PYTHON: path.join(pack, 'missing-managed-python') } }), /Configured domain Python/);
+  } finally { fs.rmSync(pack, { recursive: true, force: true }); }
 });

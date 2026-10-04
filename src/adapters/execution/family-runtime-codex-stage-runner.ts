@@ -437,18 +437,20 @@ async function runCodexStageRunner(input: CodexStageRunnerInput): Promise<CodexS
     process.env.OPL_CODEX_STAGE_RUNNER_COMMAND_NO_PROGRESS_TIMEOUT_MS,
     DEFAULT_CODEX_STAGE_RUNNER_COMMAND_NO_PROGRESS_TIMEOUT_MS,
   );
-  const providerEnv = codexStageAttemptEnv({
-    attempt: input.attempt,
-    stagePacketRef: stagePacketTransportRef,
-    workspaceRoot,
-  });
-  const codexExecOptions = codexExecOptionsFromPolicy(executorPolicyFromAttempt(input.attempt));
-  let sandboxExecution: E2bCodexStageExecutionSummary | LocalCodexStageSandboxExecutionSummary | null = null;
   const stageSandboxEnv = { ...process.env, ...input.env };
   const sandboxProvider = selectCodexStageSandboxProvider(stageSandboxEnv);
   const runInE2bSandbox = sandboxProvider === 'e2b';
   const runInLocalSandbox = sandboxProvider === 'local_devcontainer' || sandboxProvider === 'local_docker';
   const runInSandbox = runInE2bSandbox || runInLocalSandbox;
+  const providerEnv = codexStageAttemptEnv({
+    attempt: input.attempt,
+    stagePacketRef: stagePacketTransportRef,
+    workspaceRoot,
+    env: stageSandboxEnv,
+    domainPython: !runInSandbox,
+  });
+  const codexExecOptions = codexExecOptionsFromPolicy(executorPolicyFromAttempt(input.attempt));
+  let sandboxExecution: E2bCodexStageExecutionSummary | LocalCodexStageSandboxExecutionSummary | null = null;
   let runtimeEnvironmentProvider: ReturnType<typeof resolveRuntimeEnvironmentProvider> = null;
   try {
     runtimeEnvironmentProvider = runInE2bSandbox
@@ -483,6 +485,8 @@ async function runCodexStageRunner(input: CodexStageRunnerInput): Promise<CodexS
       attempt: input.attempt,
       stagePacketRef: stagePacketTransportRef,
       workspaceRoot: runInSandbox ? sandboxWorkspaceRoot : workspaceRoot,
+      env: stageSandboxEnv,
+      domainPython: !runInSandbox,
     });
     const hostSkillRuntime = runInSandbox ? null : hostAttemptSkillRuntime(input.attempt);
     const sandboxSkillRuntime = runInSandbox

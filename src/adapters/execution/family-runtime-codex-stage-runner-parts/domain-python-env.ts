@@ -1,137 +1,87 @@
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { FrameworkContractError } from '../../../kernel/contract-validation.ts';
 import { stringValue as optionalString } from '../../../kernel/json-record.ts';
+import { resolveDomainPythonCommand } from '../domain-helper-runtime.ts';
 import { isRecord, type JsonRecord } from './shared.ts';
 
-/**
- * A MAS-hosted Stage Attempt calls its own Python domain handlers (for example
- * `med_autoscience.authority_handlers._generation_manifest.build_stage_review_input_snapshot_bundle`)
- * inside the Codex executor process. Those handlers import both the domain pack's
- * own `src/` package and the framework's `python/opl_framework` authority package,
- * and the framework package needs Python >= 3.10 (the pack itself declares 3.12).
- *
- * A bare Codex stage attempt previously inherited the worker's PATH, where `python3`
- * resolves to the system 3.9 interpreter, and no PYTHONPATH was injected. That made
- * the import impossible, so producers/repairers could never materialize the exact
- * review-input snapshot request and the quality gate dead-looped across stages.
- *
- * This mirrors the existing `pack-native-helper-execution.ts` convention — pack
- * source root and framework python root on PYTHONPATH — and additionally guarantees
- * a Python interpreter new enough for those imports is first on PATH.
- */
-
 const FRAMEWORK_PYTHON_ROOT = path.resolve(import.meta.dirname, '../../../../python');
-const MIN_PYTHON = { major: 3, minor: 11 } as const;
-
-function atLeastMinimum(major: number, minor: number) {
-  return major > MIN_PYTHON.major || (major === MIN_PYTHON.major && minor >= MIN_PYTHON.minor);
-}
-
-function parseVersionFromPath(candidate: string): { major: number; minor: number } | null {
-  const match = /(?:^|[^0-9])python(\d+)\.(\d+)(?:[^0-9]|$)/.exec(candidate)
-    ?? /cpython-(\d+)\.(\d+)/.exec(candidate);
-  if (!match) return null;
-  const major = Number(match[1]);
-  const minor = Number(match[2]);
-  return Number.isFinite(major) && Number.isFinite(minor) ? { major, minor } : null;
-}
-
-function isExecutableFile(candidate: string) {
-  try {
-    const stat = fs.statSync(candidate);
-    return stat.isFile() && (stat.mode & 0o111) !== 0;
-  } catch {
-    return false;
-  }
-}
-
-function dirnameOfPythonCommand(command: string) {
-  const resolved = command.includes(path.sep) ? command : null;
-  return resolved ? path.dirname(resolved) : null;
-}
-
-function uvManagedPythonBins(env: NodeJS.ProcessEnv) {
-  const installDir = optionalString(env.UV_PYTHON_INSTALL_DIR)
-    ?? path.join(optionalString(env.HOME) ?? os.homedir(), '.local', 'share', 'uv', 'python');
-  const found: Array<{ dir: string; version: { major: number; minor: number } }> = [];
-  let entries: string[];
-  try {
-    entries = fs.readdirSync(installDir);
-  } catch {
-    return found;
-  }
-  for (const entry of entries) {
-    const binDir = path.join(installDir, entry, 'bin');
-    if (!isExecutableFile(path.join(binDir, 'python3'))) continue;
-    const version = parseVersionFromPath(entry);
-    if (!version) continue;
-    found.push({ dir: binDir, version });
-  }
-  return found.sort((left, right) => (
-    right.version.major - left.version.major || right.version.minor - left.version.minor
-  ));
-}
-
-function resolvePythonBinDir(env: NodeJS.ProcessEnv): string | null {
-  const managed = optionalString(env.OPL_MANAGED_PYTHON);
-  if (managed) {
-    const dir = dirnameOfPythonCommand(managed) ?? (isExecutableFile(managed) ? path.dirname(managed) : null);
-    if (dir) return dir;
-  }
-  const explicit = optionalString(env.OPL_DOMAIN_PYTHON_COMMAND);
-  if (explicit) {
-    const dir = dirnameOfPythonCommand(explicit);
-    if (dir) return dir;
-  }
-  for (const candidate of uvManagedPythonBins(env)) {
-    if (atLeastMinimum(candidate.version.major, candidate.version.minor)) return candidate.dir;
-  }
-  return null;
-}
 
 function domainPackSourceRoot(attempt: JsonRecord) {
   const locator = isRecord(attempt.workspace_locator) ? attempt.workspace_locator : {};
-  const packRoot = optionalString(locator.domain_pack_root) ?? optionalString(attempt.domain_pack_root);
+  const packRoot = optionalString(attempt.domain_pack_root) ?? optionalString(locator.domain_pack_root);
   if (!packRoot) return null;
-  const srcRoot = path.join(packRoot, 'src');
+  const srcRoot = path.resolve(packRoot, 'src');
+  return fs.existsSync(srcRoot) && fs.statSync(srcRoot).isDirectory() ? srcRoot : null;
+}
+
+function minimumPython(sourceRoot: string) {
+  const project = path.join(sourceRoot, '..', 'pyproject.toml');
+  const declaration = fs.existsSync(project) ? fs.readFileSync(project, 'utf8') : '';
+  const match = /requires-python\s*=\s*["']>=\s*(\d+)\.(\d+)/.exec(declaration);
+  return match ? [Number(match[1]), Number(match[2])] : [3, 11];
+}
+
+function pythonBin(command: string, args: string[], env: NodeJS.ProcessEnv, minimum: number[]) {
+  const probe = spawnSync(command, [...args, '-c',
+    'import json,sys; print(json.dumps({"executable":sys.executable,"version":list(sys.version_info[:2])}))',
+  ], { env, encoding: 'utf8', timeout: 2000 });
+  if (probe.status !== 0) return null;
   try {
-    return fs.statSync(srcRoot).isDirectory() ? srcRoot : null;
-  } catch {
-    return null;
+    const result = JSON.parse(probe.stdout);
+    if (result.version[0] < minimum[0]! || (result.version[0] === minimum[0]! && result.version[1] < minimum[1]!)) return null;
+    const dir = path.dirname(result.executable);
+    // Codex authors invoke python3. A configured versioned command must also expose
+    // a callable, compatible python3 in its bin directory; a directory name is no proof.
+    const python3 = path.join(dir, process.platform === 'win32' ? 'python3.exe' : 'python3');
+    const alias = spawnSync(python3, ['-c', `import sys; raise SystemExit(0 if sys.version_info[:2] >= (${minimum.join(',')}) else 1)`],
+      { env, encoding: 'utf8', timeout: 2000 });
+    return alias.status === 0 ? dir : null;
+  } catch { return null; }
+}
+
+function resolvePythonBinDir(env: NodeJS.ProcessEnv, minimum: number[]) {
+  if (env.OPL_DOMAIN_PYTHON_COMMAND?.trim() || env.OPL_MANAGED_PYTHON?.trim()) {
+    const selected = resolveDomainPythonCommand({ env });
+    if (env.OPL_MANAGED_PYTHON?.trim() && !env.OPL_DOMAIN_PYTHON_COMMAND?.trim()
+      && selected.source !== 'managed_runtime') {
+      throw new FrameworkContractError('surface_not_found', 'Configured domain Python is unavailable.', { fallback_allowed: false });
+    }
+    const dir = pythonBin(selected.command, selected.args, env, minimum);
+    if (dir) return dir;
+    throw new FrameworkContractError('surface_not_found', 'Configured domain Python cannot expose a compatible python3.', {
+      minimum_python: minimum.join('.'), fallback_allowed: false,
+    });
   }
+  const installDir = optionalString(env.UV_PYTHON_INSTALL_DIR)
+    ?? path.join(optionalString(env.HOME) ?? os.homedir(), '.local', 'share', 'uv', 'python');
+  const managed = fs.existsSync(installDir) ? fs.readdirSync(installDir).sort().reverse()
+    .map((entry) => path.join(installDir, entry, 'bin', 'python3')) : [];
+  for (const command of [...managed, 'python3']) {
+    const dir = pythonBin(command, [], env, minimum);
+    if (dir) return dir;
+  }
+  throw new FrameworkContractError('surface_not_found', 'Domain Stage requires a compatible Python runtime.', {
+    minimum_python: minimum.join('.'), fallback_installer_in_domain_repo: false,
+  });
 }
 
 export function domainPythonEnvironment(input: {
   attempt: JsonRecord;
   env?: NodeJS.ProcessEnv;
 }): Record<string, string | undefined> {
+  const sourceRoot = domainPackSourceRoot(input.attempt);
+  if (!sourceRoot || !fs.existsSync(path.join(FRAMEWORK_PYTHON_ROOT, 'opl_framework'))) return {};
   const env = { ...process.env, ...(input.env ?? {}) };
-  const pythonPathEntries = [
-    domainPackSourceRoot(input.attempt),
-    fs.existsSync(path.join(FRAMEWORK_PYTHON_ROOT, 'opl_framework')) ? FRAMEWORK_PYTHON_ROOT : null,
-    optionalString(env.PYTHONPATH),
-  ].filter((entry): entry is string => Boolean(entry));
-  const overlay: Record<string, string | undefined> = {
-    PYTHONPATH: pythonPathEntries.join(path.delimiter),
+  const pythonBinDir = resolvePythonBinDir(env, minimumPython(sourceRoot));
+  return {
+    PYTHONPATH: [...new Set([sourceRoot, FRAMEWORK_PYTHON_ROOT, ...(env.PYTHONPATH ?? '').split(path.delimiter)].filter(Boolean))].join(path.delimiter),
     PYTHONDONTWRITEBYTECODE: env.PYTHONDONTWRITEBYTECODE ?? '1',
+    PATH: [pythonBinDir, ...(env.PATH ?? '').split(path.delimiter).filter((entry) => entry && entry !== pythonBinDir)].join(path.delimiter),
   };
-  const pythonBinDir = resolvePythonBinDir(env);
-  if (pythonBinDir) {
-    const currentPath = optionalString(env.PATH) ?? '';
-    const segments = currentPath.split(path.delimiter).filter(Boolean);
-    if (segments[0] !== pythonBinDir) {
-      overlay.PATH = [pythonBinDir, ...segments.filter((segment) => segment !== pythonBinDir)]
-        .join(path.delimiter);
-    }
-  }
-  return overlay;
 }
 
-export const __testing = {
-  FRAMEWORK_PYTHON_ROOT,
-  domainPackSourceRoot,
-  resolvePythonBinDir,
-  uvManagedPythonBins,
-};
+export const __testing = { FRAMEWORK_PYTHON_ROOT, domainPackSourceRoot, resolvePythonBinDir };
