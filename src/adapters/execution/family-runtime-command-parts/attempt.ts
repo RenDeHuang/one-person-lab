@@ -1,4 +1,3 @@
-import { FrameworkContractError } from '../../../kernel/contract-validation.ts';
 import type {
   FamilyRuntimeDomainId,
   FamilyRuntimeProviderKind,
@@ -6,6 +5,24 @@ import type {
 } from '../family-runtime-types.ts';
 import type { FamilyRuntimeCommandInput } from '../family-runtime-command.ts';
 import { assertDomainId, assertProviderKind, assertSignalKind, parseCliOptions, parsePayloadArg } from './shared.ts';
+import {
+  runAttemptArchiveCommand,
+  runAttemptCancelCommand,
+  runAttemptStartCommand,
+} from './attempt-lifecycle.ts';
+import { runAttemptCreateCommand } from './attempt-create.ts';
+import {
+  runAttemptInspectCommand,
+  runAttemptListCommand,
+  runAttemptQueryCommand,
+} from './attempt-query.ts';
+import {
+  runAttemptFixtureCommand,
+  runAttemptSignalCommand,
+} from './attempt-signal.ts';
+import type { FamilyRuntimeAttemptCommandContext } from './attempt-shared.ts';
+
+import { FrameworkContractError } from '../../../kernel/contract-validation.ts';
 
 export function parseAttemptArgs(rest: string[]): FamilyRuntimeCommandInput | undefined {
   if (rest[0] === 'list') {
@@ -442,4 +459,56 @@ function parseAttemptCreateArgs(rest: string[]): FamilyRuntimeCommandInput {
       start,
     },
   };
+}
+
+export async function runFamilyRuntimeAttemptCommand(
+  context: FamilyRuntimeAttemptCommandContext & { parsed: FamilyRuntimeCommandInput },
+): Promise<Record<string, unknown>> {
+  const { parsed } = context;
+  if (parsed.mode === 'attempt_create') {
+    return await runAttemptCreateCommand(
+      context as Parameters<typeof runAttemptCreateCommand>[0],
+    );
+  }
+  if (parsed.mode === 'attempt_start') {
+    return await runAttemptStartCommand(
+      context as Parameters<typeof runAttemptStartCommand>[0],
+    );
+  }
+  if (parsed.mode === 'attempt_cancel') {
+    return await runAttemptCancelCommand(
+      context as Parameters<typeof runAttemptCancelCommand>[0],
+    );
+  }
+  if (parsed.mode === 'attempt_archive' || parsed.mode === 'attempt_restore') {
+    return runAttemptArchiveCommand(
+      context as Parameters<typeof runAttemptArchiveCommand>[0],
+    );
+  }
+  if (parsed.mode === 'attempt_list') {
+    return await runAttemptListCommand(
+      context as Parameters<typeof runAttemptListCommand>[0],
+    );
+  }
+  if (parsed.mode === 'attempt_inspect') {
+    return await runAttemptInspectCommand(
+      context as Parameters<typeof runAttemptInspectCommand>[0],
+    );
+  }
+  if (parsed.mode === 'attempt_query') {
+    return await runAttemptQueryCommand(
+      context as Parameters<typeof runAttemptQueryCommand>[0],
+    );
+  }
+  if (parsed.mode === 'attempt_signal') {
+    return await runAttemptSignalCommand(
+      context as Parameters<typeof runAttemptSignalCommand>[0],
+    );
+  }
+  if (parsed.mode === 'attempt_fixture_run') {
+    return runAttemptFixtureCommand(
+      context as Parameters<typeof runAttemptFixtureCommand>[0],
+    );
+  }
+  throw new Error(`Unhandled family runtime attempt mode: ${(parsed as { mode: string }).mode}`);
 }
