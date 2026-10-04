@@ -8,10 +8,7 @@ import {
   type CodexCommandResult,
 } from './codex.ts';
 import {
-  AGENT_EXECUTOR_KINDS,
   type AgentExecutionReceipt,
-  type AgentExecutorKind,
-  type StageAttemptExecutorPolicy,
 } from './agent-executor.ts';
 import type {
   AgentExecutorRequestCompositionFactory,
@@ -32,7 +29,6 @@ import { codexStageAttemptEnv } from './family-runtime-codex-stage-runner-parts/
 import {
   normalizeTypedStageCloseoutPacket,
   validateCloseoutPacketForAttempt,
-  type TypedStageCloseoutPacket,
 } from './family-runtime-codex-stage-runner-parts/closeout-normalization.ts';
 import { recoverDefaultExecutorDomainReceiptCloseout } from './family-runtime-codex-stage-runner-parts/default-executor-recovery.ts';
 import {
@@ -52,6 +48,23 @@ import {
   type CodexStageRunnerInput,
   type RunnerEventSummary,
 } from './family-runtime-codex-stage-runner-parts/input-prompt.ts';
+import {
+  codexCloseoutCaptureExecOptions,
+  codexExecOptionsFromPolicy,
+  codexProjectionRunnerModeFromAttempt,
+  codexSandboxPolicyFromEnvironment,
+  codexSandboxWorkspaceRoot,
+  executorKindFromAttemptPolicy,
+  executorPolicyFromAttempt,
+  normalizeAgentExecutorStageMode,
+} from './family-runtime-codex-stage-runner-parts/executor-policy.ts';
+import {
+  buildProviderRuntimeCloseoutPacket,
+  closeoutExecutionScopeFromAttempt,
+  providerBlockedReasonFrom,
+  summarizeCodexProviderErrors,
+} from './family-runtime-codex-stage-runner-parts/provider-result.ts';
+import { withCodexTokenAccounting } from './family-runtime-codex-stage-runner-parts/token-accounting.ts';
 export type { CodexStageRunnerInput } from './family-runtime-codex-stage-runner-parts/input-prompt.ts';
 import { verifyStageQualityCloseoutArtifactIdentity } from './family-runtime-codex-stage-runner-parts/artifact-identity-verification.ts';
 import {
@@ -74,9 +87,7 @@ import {
 } from './e2b-codex-stage-execution.ts';
 import { resolveRuntimeEnvironmentProvider } from './runtime-environment-provider.ts';
 import {
-  localSandboxWorkspaceRoot,
   runCodexInLocalSandbox,
-  selectCodexStageSandboxProvider,
   type LocalCodexStageSandboxExecutionSummary,
 } from './local-codex-stage-sandbox.ts';
 import {
@@ -94,7 +105,6 @@ import {
   packageSkillPromptPrefix,
   sandboxAttemptSkillRuntime,
 } from './family-runtime-attempt-skill-projection.ts';
-import { requireFamilyRuntimeExecutionScope } from './family-runtime-execution-scope.ts';
 
 export {
   normalizeTypedStageCloseoutPacket,
@@ -104,146 +114,6 @@ export {
 export {
   createCodexCloseoutCaptureForTest,
 } from './family-runtime-codex-stage-runner-parts/stage-closeout-capture.ts';
-
-function normalizeAgentExecutorStageMode(value?: string | null): AgentExecutorKind | null {
-  const normalized = value?.trim().replace(/-/g, '_');
-  if (AGENT_EXECUTOR_KINDS.includes(normalized as AgentExecutorKind)) {
-    return normalized as AgentExecutorKind;
-  }
-  return null;
-}
-
-function executorPolicyFromAttempt(attempt: JsonRecord): StageAttemptExecutorPolicy | null {
-  const direct = isRecord(attempt.stage_attempt_executor_policy)
-    ? attempt.stage_attempt_executor_policy
-    : isRecord(attempt.executor_policy)
-      ? attempt.executor_policy
-      : isRecord(attempt.workspace_locator)
-        && isRecord(attempt.workspace_locator.stage_attempt_executor_policy)
-        ? attempt.workspace_locator.stage_attempt_executor_policy
-      : null;
-  return direct;
-}
-
-function codexExecOptionsFromPolicy(policy: StageAttemptExecutorPolicy | null) {
-  return {
-    model: optionalString(policy?.model) ?? undefined,
-    provider: optionalString(policy?.provider) ?? undefined,
-    reasoningEffort: optionalString(policy?.reasoning_effort) ?? undefined,
-  };
-}
-
-function codexCloseoutCaptureExecOptions(input: {
-  codexExecOptions: ReturnType<typeof codexExecOptionsFromPolicy>;
-  outputLastMessagePath: string;
-}) {
-  return {
-    ...input.codexExecOptions,
-    outputLastMessagePath: input.outputLastMessagePath,
-  };
-}
-
-function executorKindFromAttemptPolicy(attempt: JsonRecord) {
-  return normalizeAgentExecutorStageMode(optionalString(executorPolicyFromAttempt(attempt)?.executor_kind));
-}
-
-function closeoutExecutionScopeFromAttempt(attempt: JsonRecord) {
-  if (attempt.scope_kind === 'identity_unresolved' || attempt.identity_state === 'identity_unresolved') {
-    throw new FrameworkContractError(
-      'contract_shape_invalid',
-      'Identity-unresolved StageAttempt cannot produce a typed closeout.',
-      {
-        failure_code: 'runtime_ingress_identity_unresolved',
-        stage_attempt_id: optionalString(attempt.stage_attempt_id),
-      },
-    );
-  }
-  const workspaceLocator = isRecord(attempt.workspace_locator) ? attempt.workspace_locator : {};
-  const executionScope = requireFamilyRuntimeExecutionScope({
-    scopeKind: attempt.scope_kind,
-    executionScope: attempt.execution_scope,
-    workspaceLocator,
-    domainId: optionalString(attempt.domain_id) ?? optionalString(workspaceLocator.domain_id),
-    operation: 'build_provider_runtime_closeout',
-  }).executionScope;
-  return executionScope
-    ? { execution_scope: executionScope, scope_digest: executionScope.scope_digest }
-    : {};
-}
-
-function codexProjectionRunnerModeFromAttempt(attempt: JsonRecord) {
-  const explicitMode = normalizeCodexStageRunnerMode(process.env.OPL_CODEX_STAGE_RUNNER_MODE);
-  if (process.env.OPL_CODEX_STAGE_RUNNER_MODE?.trim()) {
-    return explicitMode;
-  }
-  const executorKind = normalizeAgentExecutorStageMode(optionalString(attempt.executor_kind))
-    ?? executorKindFromAttemptPolicy(attempt);
-  return executorKind === 'codex_cli' ? 'codex_cli' : explicitMode;
-}
-
-function buildProviderRuntimeCloseoutPacket(input: {
-  attempt: JsonRecord;
-  stagePacketRef: string;
-  blockedReason: string;
-  routeImpact?: JsonRecord | null;
-}) {
-  const stageAttemptId = optionalString(input.attempt.stage_attempt_id) ?? 'unknown-attempt';
-  const idempotencyKey = optionalString(input.attempt.idempotency_key);
-  const stageId = stageIdFromAttempt(input.attempt);
-  const domainId = optionalString(input.attempt.domain_id);
-  return normalizeTypedStageCloseoutPacket({
-    surface_kind: 'stage_attempt_closeout_packet',
-    stage_attempt_id: stageAttemptId,
-    ...(optionalString(input.attempt.stage_run_id)
-      ? { stage_run_id: optionalString(input.attempt.stage_run_id) }
-      : {}),
-    ...closeoutExecutionScopeFromAttempt(input.attempt),
-    ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
-    closeout_refs: [
-      `opl://stage-attempts/${encodeURIComponent(stageAttemptId)}/runtime-blockers/${encodeURIComponent(input.blockedReason)}`,
-    ],
-    consumed_refs: [input.stagePacketRef],
-    consumed_memory_refs: [],
-    writeback_receipt_refs: [],
-    rejected_writes: [{
-      surface_kind: 'opl_provider_runtime_typed_blocker_ref',
-      blocker_id: input.blockedReason,
-      stage_attempt_id: stageAttemptId,
-      stage_id: stageId,
-      ...(domainId ? { domain_id: domainId } : {}),
-      owner: 'one-person-lab',
-      reason: input.blockedReason,
-      provider_completion_is_domain_ready: false,
-      authority_boundary: {
-        opl: 'provider_runtime_blocker_ref_only',
-        domain: 'truth_quality_artifact_gate_owner',
-        can_write_domain_truth: false,
-        can_create_domain_owner_receipt: false,
-        can_create_domain_typed_blocker: false,
-        can_authorize_quality_verdict: false,
-        can_claim_domain_ready: false,
-      },
-    }],
-    next_owner: domainId ?? null,
-    domain_ready_verdict: 'domain_gate_pending',
-    route_impact: {
-      provider_blocker_reason: input.blockedReason,
-      provider_blocker_surface: 'codex_stage_activity.process_output_summary',
-      runtime_blocker_owner: 'one-person-lab',
-      runtime_blocker_is_domain_owner_answer: false,
-      provider_completion_is_domain_ready: false,
-      ...(input.routeImpact ?? {}),
-    },
-    authority_boundary: {
-      opl: 'provider_runtime_closeout_transport_only',
-      domain: 'truth_quality_artifact_gate_owner',
-      can_write_domain_truth: false,
-      can_create_owner_receipt: false,
-      can_create_typed_blocker: false,
-      provider_completion_is_domain_ready: false,
-    },
-  });
-}
 
 export function buildRawArtifactProgressCloseoutPacket(input: {
   attempt: JsonRecord;
@@ -305,101 +175,6 @@ export function buildRawArtifactProgressCloseoutPacket(input: {
   });
 }
 
-function summarizeCodexProviderErrors(errors?: CodexCommandResult['providerErrors'] | null) {
-  const normalized = (errors ?? [])
-    .filter((error) => error.message.trim().length > 0)
-    .map((error) => ({
-      message: error.message.trim(),
-      statusCode: error.statusCode,
-    }));
-  return {
-    count: normalized.length,
-    statusCodes: [
-      ...new Set(normalized
-        .map((error) => error.statusCode)
-        .filter((statusCode): statusCode is number => typeof statusCode === 'number')),
-    ],
-    messages: [
-      ...new Set(normalized.map((error) => error.message)),
-    ].slice(-3),
-  };
-}
-
-function providerBlockedReasonFrom(errors?: CodexCommandResult['providerErrors'] | null) {
-  const messages = (errors ?? []).map((error) => error.message.trim());
-  return messages.find((message) => message.startsWith('local_sandbox_')) ?? null;
-}
-
-function withCodexTokenAccounting(
-  closeoutPacket: TypedStageCloseoutPacket | null,
-  costSummary: ReturnType<typeof codexStageRunnerCostSummaryFrom>,
-) {
-  if (!closeoutPacket) {
-    return closeoutPacket;
-  }
-  const tokenUsage = costSummary.token_usage;
-  const observedTokenUsage = tokenUsage
-    ? {
-        status: 'observed',
-        input_tokens: tokenUsage.input_tokens,
-        cached_input_tokens: tokenUsage.cached_input_tokens,
-        output_tokens: tokenUsage.output_tokens,
-        reasoning_output_tokens: tokenUsage.reasoning_output_tokens,
-        total_tokens: tokenUsage.total_tokens,
-        source: costSummary.telemetry_source,
-        source_ref: costSummary.source_ref,
-        observed_at: costSummary.observed_at,
-        billing_boundary: costSummary.billing_boundary,
-      }
-    : null;
-  const usageRefs = [
-    optionalString(costSummary.source_ref),
-    optionalString(costSummary.session_usage_refs?.session_ref),
-  ].filter((ref): ref is string => Boolean(ref));
-  const mergedUsageRefs = [
-    ...new Set([
-      ...(closeoutPacket.usage_refs ?? []),
-      ...usageRefs,
-    ]),
-  ];
-  const withStageLogAccounting = (stageLog: JsonRecord | undefined) => {
-    if (!stageLog) {
-      return undefined;
-    }
-    const stageLogUsageRefs = [
-      ...new Set([
-        ...(
-          Array.isArray(stageLog.token_usage_refs)
-            ? stageLog.token_usage_refs.filter((ref): ref is string => typeof ref === 'string' && ref.trim().length > 0)
-            : []
-        ),
-        ...mergedUsageRefs,
-      ]),
-    ];
-    return {
-      ...stageLog,
-      ...(observedTokenUsage ? { token_usage: observedTokenUsage } : {}),
-      ...(stageLogUsageRefs.length > 0 ? { token_usage_refs: stageLogUsageRefs } : {}),
-    };
-  };
-  return {
-    ...closeoutPacket,
-    ...(observedTokenUsage ? { token_usage: observedTokenUsage } : {}),
-    ...(mergedUsageRefs.length > 0 ? { usage_refs: mergedUsageRefs } : {}),
-    ...(costSummary.session_usage_refs ? { session_usage_refs: costSummary.session_usage_refs } : {}),
-    cost_summary: costSummary,
-    ...(closeoutPacket.user_stage_log
-      ? { user_stage_log: withStageLogAccounting(closeoutPacket.user_stage_log) }
-      : {}),
-    ...(closeoutPacket.stage_log_summary
-      ? { stage_log_summary: withStageLogAccounting(closeoutPacket.stage_log_summary) }
-      : {}),
-    ...(closeoutPacket.human_stage_log
-      ? { human_stage_log: withStageLogAccounting(closeoutPacket.human_stage_log) }
-      : {}),
-  };
-}
-
 async function runCodexStageRunner(input: CodexStageRunnerInput): Promise<CodexStageRunnerReceipt> {
   const runnerMode = normalizeCodexStageRunnerMode(input.runnerMode);
   const stagePacketRef = resolvedStagePacketRef(input);
@@ -438,10 +213,11 @@ async function runCodexStageRunner(input: CodexStageRunnerInput): Promise<CodexS
     DEFAULT_CODEX_STAGE_RUNNER_COMMAND_NO_PROGRESS_TIMEOUT_MS,
   );
   const stageSandboxEnv = { ...process.env, ...input.env };
-  const sandboxProvider = selectCodexStageSandboxProvider(stageSandboxEnv);
-  const runInE2bSandbox = sandboxProvider === 'e2b';
-  const runInLocalSandbox = sandboxProvider === 'local_devcontainer' || sandboxProvider === 'local_docker';
-  const runInSandbox = runInE2bSandbox || runInLocalSandbox;
+  const sandboxPolicy = codexSandboxPolicyFromEnvironment(stageSandboxEnv);
+  const sandboxProvider = sandboxPolicy.provider;
+  const runInE2bSandbox = sandboxPolicy.runInE2bSandbox;
+  const runInLocalSandbox = sandboxPolicy.runInLocalSandbox;
+  const runInSandbox = sandboxPolicy.runInSandbox;
   const providerEnv = codexStageAttemptEnv({
     attempt: input.attempt,
     stagePacketRef: stagePacketTransportRef,
@@ -467,13 +243,7 @@ async function runCodexStageRunner(input: CodexStageRunnerInput): Promise<CodexS
         },
       );
     }
-    const sandboxWorkspaceRoot = runInE2bSandbox
-      ? stageSandboxEnv.OPL_E2B_WORKSPACE_ROOT?.trim()
-        || stageSandboxEnv.OPL_EXTERNAL_SANDBOX_WORKSPACE_ROOT?.trim()
-        || '/home/user/opl-stage-workspace'
-      : runInLocalSandbox
-        ? localSandboxWorkspaceRoot(stageSandboxEnv)
-        : workspaceRoot;
+    const sandboxWorkspaceRoot = codexSandboxWorkspaceRoot(stageSandboxEnv, workspaceRoot, sandboxPolicy);
     const executionAttempt = runInSandbox
       ? sandboxAttemptForCodex({
           attempt: input.attempt,
@@ -536,7 +306,7 @@ async function runCodexStageRunner(input: CodexStageRunnerInput): Promise<CodexS
           ...input.env,
           ...executionProviderEnv,
         },
-        providerKind: sandboxProvider,
+        providerKind: sandboxProvider as 'local_devcontainer' | 'local_docker',
         timeoutMs,
         signal: input.signal,
         onRunnerProgress(summary) {
