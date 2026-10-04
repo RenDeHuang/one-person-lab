@@ -1,9 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-
-import type { Client } from '@temporalio/client';
+import { pathToFileURL } from 'node:url';
 import agentBlueprintSchema from '../../../contracts/opl-framework/foundry-agent-blueprint.schema.json' with { type: 'json' };
 import evolutionProposalSchema from '../../../contracts/opl-framework/foundry-evolution-proposal.schema.json' with { type: 'json' };
 
@@ -12,7 +10,6 @@ import { FrameworkContractError, isRecord } from '../../kernel/contract-validati
 import { parseJsonText, writeJsonPayloadFile } from '../../kernel/json-file.ts';
 import {
   FoundryTransientActivityError,
-  normalizeFoundryProviderManifest,
 } from '../../authority/evolution/index.ts';
 import type {
   FoundryProviderOperationInvoker,
@@ -25,7 +22,6 @@ import { runFamilyRuntime } from './family-runtime.ts';
 import { materializeFoundrySourceArtifacts } from './foundry-source-material.ts';
 import { resolveFoundryExecutionScope } from './foundry-execution-scope.ts';
 import { writeFoundryInputArtifact } from './foundry-input-artifact.ts';
-import { assertSameExecutionScope, type WorkItemExecutionScopeSnapshot } from '../../authority/workspace/public/standard-agent-action-runtime.ts';
 import {
   appendDistinctStageRunObservation,
   summarizeStageRunObservation,
@@ -33,303 +29,64 @@ import {
   type StageRunObservation,
 } from './family-runtime-stage-run-observation.ts';
 
-import { cancelTemporalStageRunWorkflow } from './family-runtime-temporal-provider-parts/attempt-control.ts';
 import {
-  withDurableTemporalClient,
-  withTemporalRpcDeadline,
-} from './family-runtime-temporal-client.ts';
-import { stageRunQuery } from './family-runtime-temporal-workflows.ts';
+  activityKey,
+  assertFoundryProviderOperationCursorBinding,
+  assertInvocation,
+  blueprintContentRefs,
+  fail,
+  providerSourceDigest,
+  record,
+  stringList,
+  stringValue,
+  type FoundryProviderOperationCursor,
+  type FoundryProviderOperationCursorBase,
+  type FoundryProviderOperationCursorV1,
+  type FoundryProviderOperationCursorV2,
+  type FoundryProviderOperationInvocation,
+  type FoundryProviderStageRunAttemptCursor,
+  type JsonRecord,
+} from './foundry-provider-stage-run-contract.ts';
+import {
+  OplFoundryProviderStageRunGateway,
+  type FoundryProviderStageRunGateway,
+  type FoundryStageRouteCompositionFactory,
+} from './foundry-provider-stage-run-gateway.ts';
+import {
+  FileFoundryProviderArtifactReader,
+  type FoundryProviderArtifactReader,
+} from './foundry-provider-stage-run-artifact-reader.ts';
 
-type JsonRecord = Record<string, unknown>;
-export type FoundryStageRouteCompositionFactory = NonNullable<
-  NonNullable<Parameters<typeof runFamilyRuntime>[1]>['createStageRouteComposition']
->;
+export {
+  OplFoundryProviderStageRunGateway,
+  queryFoundryProviderStageRunHandle,
+} from './foundry-provider-stage-run-gateway.ts';
+export type {
+  FoundryProviderStageRunGateway,
+  FoundryStageRouteCompositionFactory,
+} from './foundry-provider-stage-run-gateway.ts';
+export {
+  FileFoundryProviderArtifactReader,
+} from './foundry-provider-stage-run-artifact-reader.ts';
+export type {
+  FoundryProviderArtifactReader,
+} from './foundry-provider-stage-run-artifact-reader.ts';
+export {
+  assertFoundryProviderOperationCursorBinding,
+} from './foundry-provider-stage-run-contract.ts';
+export type {
+  FoundryProviderOperationCursor,
+  FoundryProviderOperationCursorV1,
+  FoundryProviderOperationCursorV2,
+  FoundryProviderOperationInvocation,
+  FoundryProviderStageRunAttemptCursor,
+  FoundryProviderStageRunLaunch,
+} from './foundry-provider-stage-run-contract.ts';
 
 const SUCCESS_STAGE_RUN_STATUSES = new Set(['completed', 'completed_with_quality_debt']);
-const TERMINAL_FAILURE_WORKFLOW_STATUSES = new Set([
-  'FAILED',
-  'TIMED_OUT',
-  'CANCELED',
-  'CANCELLED',
-  'TERMINATED',
-]);
-
-function fail(message: string, details: JsonRecord = {}): never {
-  throw new FrameworkContractError('contract_shape_invalid', message, details);
-}
 
 function sha256(value: string | Buffer) {
   return crypto.createHash('sha256').update(value).digest('hex');
-}
-
-function stringValue(value: unknown, field: string) {
-  if (typeof value !== 'string' || !value.trim()) fail(`${field} must be a non-empty string.`);
-  return value.trim();
-}
-
-function stringList(value: unknown, field: string) {
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string' || !entry.trim())) {
-    fail(`${field} must be an array of non-empty strings.`);
-  }
-  return value as string[];
-}
-
-function record(value: unknown, field: string) {
-  if (!isRecord(value)) fail(`${field} must be an object.`);
-  return value;
-}
-
-function activityKey(activity: FoundryActivityIdentity) {
-  return sha256(canonicalJsonText({
-    run_id: activity.run_id,
-    iteration: activity.iteration,
-    phase: activity.phase,
-    input_digest: activity.input_digest,
-  }));
-}
-
-export type FoundryProviderStageRunLaunch = {
-  workflow_id: string;
-};
-
-export type FoundryProviderOperationInvocation = Parameters<FoundryProviderOperationInvoker['invoke']>[0];
-
-export type FoundryProviderStageRunAttemptCursor = {
-  stage_attempt_id: string;
-  workflow_id: string;
-  status: string;
-};
-
-type FoundryProviderOperationCursorBase = {
-  surface_kind: 'opl_foundry_provider_operation_cursor';
-  operation_key: string;
-  operation: 'design' | 'diagnose';
-  provider_id: string;
-  provider_manifest_digest: string;
-  activity_key: string;
-  required_stage_refs: string[];
-  optional_stage_refs: string[];
-  terminal_stage_ref: string;
-  entry_workflow_id: string;
-  current_workflow_id: string;
-  current_stage_id: string | null;
-  visited_path: Array<{ workflow_id: string; stage_id: string }>;
-  continuation: {
-    from_workflow_id: string;
-    target_workflow_id: string;
-  } | null;
-  active_attempts: FoundryProviderStageRunAttemptCursor[];
-  artifact_refs: string[];
-  artifact_hashes: string[];
-  status: 'pending' | 'terminal';
-};
-
-export type FoundryProviderOperationCursorV1 = FoundryProviderOperationCursorBase & {
-  version: 'opl-foundry-provider-operation-cursor.v1';
-};
-
-export type FoundryProviderOperationCursorV2 = FoundryProviderOperationCursorBase & {
-  version: 'opl-foundry-provider-operation-cursor.v2';
-  provider_manifest: FoundryProviderManifest;
-  provider_source_digest: string;
-  checkout_root: string;
-};
-
-export type FoundryProviderOperationCursor =
-  | FoundryProviderOperationCursorV1
-  | FoundryProviderOperationCursorV2;
-
-export interface FoundryProviderStageRunGateway {
-  launch(input: {
-    provider: FoundryProviderManifest;
-    checkout_root: string;
-    workspace_root: string;
-    execution_scope: WorkItemExecutionScopeSnapshot;
-    stage_id: string;
-    stage_run_invocation_id: string;
-    activity: FoundryActivityIdentity;
-    input_artifact_refs: string[];
-    input_artifact_hashes: string[];
-  }): Promise<FoundryProviderStageRunLaunch>;
-  query(workflowId: string): Promise<unknown>;
-  cancel(workflowId: string): Promise<void>;
-}
-
-export async function queryFoundryProviderStageRunHandle(
-  client: Client,
-  handle: ReturnType<Client['workflow']['getHandle']>,
-) {
-  const description = await withTemporalRpcDeadline(client, () => handle.describe());
-  const workflowStatus = description.status.name;
-  if (workflowStatus === 'COMPLETED') {
-    return withTemporalRpcDeadline(client, () => handle.result());
-  }
-  if (TERMINAL_FAILURE_WORKFLOW_STATUSES.has(workflowStatus)) {
-    const memo = record(description.memo, 'Foundry provider StageRun workflow memo');
-    return {
-      surface_kind: 'temporal_stage_run_query',
-      provider_kind: 'temporal',
-      stage_run_id: stringValue(memo.stage_run_id, 'Foundry provider StageRun memo stage_run_id'),
-      workflow_id: description.workflowId,
-      run_id: description.runId,
-      workflow_status: workflowStatus,
-      domain_id: typeof memo.domain_id === 'string' ? memo.domain_id : null,
-      stage_id: stringValue(memo.stage_id, 'Foundry provider StageRun memo stage_id'),
-      status: 'failed',
-      artifact_refs: [],
-      artifact_hashes: [],
-      attempts: [],
-      next_stage_run_launch: null,
-      blocked_reason: `temporal_stage_run_workflow_${workflowStatus.toLowerCase()}`,
-    };
-  }
-  return withTemporalRpcDeadline(client, () => handle.query(stageRunQuery));
-}
-
-export class OplFoundryProviderStageRunGateway implements FoundryProviderStageRunGateway {
-  readonly #runFamilyRuntime: typeof runFamilyRuntime;
-  readonly #createStageRouteComposition?: FoundryStageRouteCompositionFactory;
-
-  constructor(runStageRuntime: typeof runFamilyRuntime = runFamilyRuntime, options: {
-    create_stage_route_composition?: FoundryStageRouteCompositionFactory;
-  } = {}) {
-    this.#runFamilyRuntime = runStageRuntime;
-    this.#createStageRouteComposition = options.create_stage_route_composition;
-  }
-
-  async launch(input: Parameters<FoundryProviderStageRunGateway['launch']>[0]) {
-    const executionScope = resolveFoundryExecutionScope({
-      provider: input.provider,
-      workspace_root: input.workspace_root,
-      run_id: input.activity.run_id,
-    });
-    assertSameExecutionScope(executionScope, input.execution_scope, { operation: 'foundry_provider_launch' });
-    const workspaceLocator = canonicalJsonText({
-      workspace_root: executionScope.workspace_root,
-      execution_scope: executionScope,
-      domain_pack_root: input.checkout_root,
-      source_refs: input.input_artifact_refs,
-      foundry_run_ref: `opl://foundry/runs/${encodeURIComponent(input.activity.run_id)}`,
-      foundry_operation: input.activity.phase,
-      foundry_iteration: input.activity.iteration,
-      foundry_input_digest: input.activity.input_digest,
-    });
-    const args = [
-      'attempt',
-      'create',
-      '--domain',
-      input.provider.domain_id,
-      '--stage',
-      input.stage_id,
-      '--action',
-      input.provider.projection_policy.public_action_ids[0],
-      '--provider',
-      'temporal',
-      '--workspace-locator',
-      workspaceLocator,
-      '--scope-kind',
-      'work_item',
-      '--execution-scope',
-      canonicalJsonText(executionScope),
-      '--source-fingerprint',
-      input.activity.input_digest,
-      '--stage-run-invocation-id',
-      input.stage_run_invocation_id,
-      '--task',
-      input.activity.run_id,
-      '--start',
-    ];
-    for (let index = 0; index < input.input_artifact_refs.length; index += 1) {
-      args.push('--input-artifact-ref', input.input_artifact_refs[index]!);
-      args.push('--input-artifact-sha256', input.input_artifact_hashes[index]!);
-    }
-    let launched: Awaited<ReturnType<typeof runFamilyRuntime>>;
-    try {
-      launched = await this.#runFamilyRuntime(args, {
-        createStageRouteComposition: this.#createStageRouteComposition,
-      });
-    } catch (error) {
-      if (error instanceof FrameworkContractError) throw error;
-      throw new FoundryTransientActivityError('Foundry provider StageRun launch failed transiently.', { cause: error });
-    }
-    const stageRun = record(launched.family_runtime_stage_run, 'Foundry provider StageRun launch');
-    const stageRunInput = record(stageRun.stage_run_input, 'Foundry provider StageRun input');
-    return { workflow_id: stringValue(stageRunInput.workflow_id, 'Foundry provider workflow_id') };
-  }
-
-  async query(workflowId: string) {
-    try {
-      return await withDurableTemporalClient(async (client) => {
-        const handle = client.workflow.getHandle(workflowId);
-        return queryFoundryProviderStageRunHandle(client, handle);
-      });
-    } catch (error) {
-      if (error instanceof FrameworkContractError) throw error;
-      throw new FoundryTransientActivityError('Foundry provider StageRun query failed transiently.', { cause: error });
-    }
-  }
-
-  async cancel(workflowId: string) {
-    try {
-      await cancelTemporalStageRunWorkflow({
-        workflowId,
-        reason: 'foundry_provider_operation_cancelled',
-      });
-    } catch (error) {
-      if (error instanceof FrameworkContractError) throw error;
-      throw new FoundryTransientActivityError('Foundry provider StageRun cancellation failed transiently.', {
-        cause: error,
-      });
-    }
-  }
-}
-
-export interface FoundryProviderArtifactReader {
-  readExact(input: { ref: string; sha256: string }): Buffer;
-}
-
-export class FileFoundryProviderArtifactReader implements FoundryProviderArtifactReader {
-  readonly #allowedRoot: string;
-  readonly #maxBytes: number;
-
-  constructor(input: { allowed_root: string; max_bytes?: number }) {
-    this.#allowedRoot = fs.realpathSync.native(input.allowed_root);
-    this.#maxBytes = input.max_bytes ?? 4 * 1024 * 1024;
-  }
-
-  readExact(input: { ref: string; sha256: string }) {
-    let candidate: string;
-    try {
-      const url = new URL(input.ref);
-      if (url.protocol !== 'file:') fail('Foundry provider output must use an OPL-persisted file artifact ref.');
-      candidate = fileURLToPath(url);
-    } catch (error) {
-      if (error instanceof FrameworkContractError) throw error;
-      return fail('Foundry provider output artifact ref is invalid.', { artifact_ref: input.ref });
-    }
-    const stat = fs.lstatSync(candidate!);
-    const real = fs.realpathSync.native(candidate!);
-    if (
-      !stat.isFile()
-      || stat.isSymbolicLink()
-      || (real !== this.#allowedRoot && !real.startsWith(`${this.#allowedRoot}${path.sep}`))
-      || stat.size <= 0
-      || stat.size > this.#maxBytes
-    ) {
-      fail('Foundry provider output artifact is outside the allowed immutable transport boundary.', {
-        artifact_ref: input.ref,
-        size_bytes: stat.size,
-      });
-    }
-    const bytes = fs.readFileSync(real);
-    const expected = input.sha256.replace(/^sha256:/, '');
-    if (!/^[a-f0-9]{64}$/.test(expected) || sha256(bytes) !== expected) {
-      fail('Foundry provider output artifact bytes do not match the StageRun hash.', {
-        artifact_ref: input.ref,
-      });
-    }
-    return bytes;
-  }
 }
 
 function defaultTransportRoot(storageRoot: string) {
@@ -486,108 +243,6 @@ function activeStageAttempts(state: JsonRecord): FoundryProviderStageRunAttemptC
       ? [{ stage_attempt_id: stageAttemptId, workflow_id: workflowId, status }]
       : [];
   });
-}
-
-const BLUEPRINT_CONTENT_REF_FIELDS = [
-  'prompt_refs',
-  'skill_refs',
-  'knowledge_refs',
-  'helper_refs',
-  'model_refs',
-  'tool_refs',
-  'schema_refs',
-] as const;
-
-function blueprintContentRefs(value: unknown) {
-  const envelope = record(value, 'Foundry provider protocol output');
-  const blueprint = envelope.surface_kind === 'opl_foundry_evolution_proposal'
-    ? record(envelope.next_blueprint, 'EvolutionProposal.next_blueprint')
-    : envelope;
-  const refs = record(blueprint.content_refs, 'AgentBlueprint.content_refs');
-  const actualFields = Object.keys(refs).sort();
-  const expectedFields = [...BLUEPRINT_CONTENT_REF_FIELDS].sort();
-  if (canonicalJsonText(actualFields) !== canonicalJsonText(expectedFields)) {
-    fail('AgentBlueprint.content_refs must declare the closed seven-class resource inventory.', {
-      actual_fields: actualFields,
-      expected_fields: expectedFields,
-    });
-  }
-  return BLUEPRINT_CONTENT_REF_FIELDS.flatMap((field) =>
-    stringList(refs[field], `AgentBlueprint.content_refs.${field}`));
-}
-
-function assertInvocation(input: FoundryProviderOperationInvocation) {
-  if (input.activity.phase !== input.operation) {
-    fail('Foundry provider operation and immutable activity phase do not match.');
-  }
-  const operation = input.provider.operations[input.operation];
-  const allowedStages = new Set([...operation.required_stage_refs, ...operation.optional_stage_refs]);
-  if (!allowedStages.has(operation.entry_stage_ref) || !allowedStages.has(operation.terminal_stage_ref)) {
-    fail('Foundry provider operation entry or terminal Stage is outside its declared Stage set.');
-  }
-  return { operation, allowedStages };
-}
-
-function providerSourceDigest(input: FoundryProviderOperationInvocation) {
-  if (!/^sha256:[a-f0-9]{64}$/.test(input.provider_source_digest)) {
-    fail('Foundry provider source digest must be an exact sha256 digest.');
-  }
-  return input.provider_source_digest;
-}
-
-export function assertFoundryProviderOperationCursorBinding(
-  cursor: FoundryProviderOperationCursor,
-  operationKey: string,
-) {
-  if (!isRecord(cursor)) {
-    fail('Foundry provider operation cursor must be an object.');
-  }
-  if (cursor.operation !== 'design' && cursor.operation !== 'diagnose') {
-    fail('Foundry provider operation cursor declares an unsupported operation.');
-  }
-  if (
-    cursor.surface_kind !== 'opl_foundry_provider_operation_cursor'
-    || (
-      cursor.version !== 'opl-foundry-provider-operation-cursor.v1'
-      && cursor.version !== 'opl-foundry-provider-operation-cursor.v2'
-    )
-    || cursor.operation_key !== operationKey
-    || typeof cursor.activity_key !== 'string'
-    || !/^[a-f0-9]{64}$/.test(cursor.activity_key)
-    || typeof cursor.provider_id !== 'string'
-    || !cursor.provider_id.trim()
-    || !/^sha256:[a-f0-9]{64}$/.test(cursor.provider_manifest_digest)
-    || typeof cursor.terminal_stage_ref !== 'string'
-    || !cursor.terminal_stage_ref.trim()
-    || !Array.isArray(cursor.required_stage_refs)
-    || cursor.required_stage_refs.some((stageId) => typeof stageId !== 'string' || !stageId.trim())
-    || !Array.isArray(cursor.optional_stage_refs)
-    || cursor.optional_stage_refs.some((stageId) => typeof stageId !== 'string' || !stageId.trim())
-    || typeof cursor.entry_workflow_id !== 'string'
-    || typeof cursor.current_workflow_id !== 'string'
-    || !cursor.entry_workflow_id.trim()
-    || !cursor.current_workflow_id.trim()
-    || !Array.isArray(cursor.artifact_refs)
-    || !Array.isArray(cursor.artifact_hashes)
-    || cursor.artifact_refs.length !== cursor.artifact_hashes.length
-  ) {
-    fail('Foundry provider operation cursor does not bind the immutable invocation.');
-  }
-  if (cursor.version === 'opl-foundry-provider-operation-cursor.v1') return;
-  const providerManifest = normalizeFoundryProviderManifest(cursor.provider_manifest);
-  const declaredOperation = providerManifest.operations[cursor.operation];
-  if (
-    cursor.provider_id !== providerManifest.provider_id
-    || foundryContentDigest(providerManifest) !== cursor.provider_manifest_digest
-    || !/^sha256:[a-f0-9]{64}$/.test(cursor.provider_source_digest)
-    || typeof cursor.checkout_root !== 'string'
-    || !path.isAbsolute(cursor.checkout_root)
-    || cursor.required_stage_refs.join('\0') !== declaredOperation.required_stage_refs.join('\0')
-    || cursor.optional_stage_refs.join('\0') !== declaredOperation.optional_stage_refs.join('\0')
-    || cursor.terminal_stage_ref !== declaredOperation.terminal_stage_ref
-  ) {
-    fail('Foundry provider operation cursor does not bind the immutable invocation.');
-  }
 }
 
 export class StageRunFoundryProviderCoordinator {
