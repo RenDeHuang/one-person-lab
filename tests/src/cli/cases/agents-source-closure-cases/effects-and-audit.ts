@@ -9,7 +9,7 @@ import {
   runSourceClosure,
   writeJson,
   writeSource,
-} from './entrypoints-and-typescript.ts';
+} from './source-repo-fixture.ts';
 
 export function registerMinimalAuthorityEffects() {
   test('agents source-closure routes process and network effects out of minimal authority functions', () => {

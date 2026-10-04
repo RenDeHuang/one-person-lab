@@ -1,7 +1,7 @@
 import { assert, fs, os, path, test } from '../../helpers.ts';
 import { buildPythonSourceGraph } from '../../../../../src/authority/workspace/standard-agent-source-closure-parts/python-graph.ts';
 
-import { buildRepo, runSourceClosure, writeSource } from './entrypoints-and-typescript.ts';
+import { buildRepo, runSourceClosure, writeSource } from './source-repo-fixture.ts';
 
 export function registerPythonPyprojectRelativeCalls() {
   test('agents source-closure resolves Python pyproject scripts and relative calls', () => {
