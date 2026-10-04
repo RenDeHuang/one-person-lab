@@ -1,0 +1,770 @@
+import { FrameworkContractError } from '../../../kernel/contract-validation.ts';
+import {
+  runOplAgentPackageExposureAction,
+  runOplAgentPackageHomeShortcutPreferencesSet,
+  runOplAgentPackageInstall,
+  runOplAgentPackageRepair,
+  runOplAgentPackageUninstall,
+  runOplAgentPackageUpdate,
+  runOplModuleAction,
+  agentPackageDelegatedSurface,
+  inspectManagedBrowserAutomation,
+  MANAGED_BROWSER_AUTOMATION_ACTION_IDS,
+  reconcileManagedBrowserAutomation,
+  type ManagedBrowserAutomationActionId,
+  completeOplGatewaySetup,
+  disconnectOplGatewayAccount,
+  refreshOplGatewayAccount,
+  repairOplGatewayAccount,
+  useOplGatewayForModelAccess,
+  buildAgentPackageStoreStorageInventory,
+  buildWebuiDataVolumeStorageInventory,
+  inspectManagedComputerUse,
+  MANAGED_COMPUTER_USE_ACTION_IDS,
+  reconcileManagedComputerUse,
+  type ManagedComputerUseActionId,
+  type CordisConnectDescriptorDiscoveryService,
+  refreshInstalledAgentPackageWorkspaceSkills,
+  runOplSystemAction,
+  writeOplWorkspaceRootSurface,
+  runOplEngineAction,
+  buildOplDockerWebuiDoctor,
+  runOplTurnkeyInstall,
+} from '../../../adapters/integration/index.ts';
+import type { runFamilyRuntime } from '../../../adapters/execution/index.ts';
+import { executeWorkspaceAppAction } from '../app-state-workspace-actions.ts';
+import { preflightAppContribution, runAppContribution } from '../app-contribution-broker.ts';
+import type { FrameworkContracts } from '../../../kernel/types.ts';
+import {
+  agentPackageIdPayload,
+  agentPackageInstallPayload,
+  agentPackageManifestInstallPayload,
+  agentPackagePreferencesPayload,
+  modulePayload,
+  packageContributionExecutePayload,
+  parseCodexAction,
+  parseModuleAction,
+  releaseChannelPayload,
+  settingsVerifyWorkspacePayload,
+  stringPayloadField,
+  workspaceRootPayload,
+} from './action-execute-payloads.ts';
+import {
+  buildDockerWebuiSettingsManualAction,
+  buildSettingsControlCenterDryRun,
+  buildSettingsPruneRuntimeRootsPlan,
+  buildTaskActionReceiptPreview,
+  buildTaskExportBundlePreview,
+  dryRunEngineAction,
+  dryRunModuleAction,
+} from './action-execute-previews.ts';
+import { executeConnectionAppAction } from './action-execute-connections.ts';
+import { executeProviderAppAction } from './action-execute-provider.ts';
+import {
+  restoreCodexUserInstructionsFromOplFlowDefault,
+  writeCodexUserInstructions,
+} from '../codex-personalization.ts';
+import {
+  setWorkItemControlState,
+  setWorkItemVisibilityState,
+  type WorkItemUserLifecycleState,
+  type WorkItemVisibilityState,
+} from '../../../authority/evidence/index.ts';
+import {
+  OPL_PACK_PROVISION_SUBMISSION_RESOURCE_ACTION_ID,
+  provisionSubmissionResource,
+} from '../../../authority/packages/index.ts';
+import { buildOplRuntimeAppState } from '../app-runtime-state.ts';
+import {
+  observeWorkItemExecutionSessionBinding,
+  resolveWorkItemExecutionSessionObservationTarget,
+  type ObserveWorkItemExecutionSessionInput,
+} from '../work-item-projection/session-activity.ts';
+import type { AppActionExecuteOptions } from './action-execute-parser.ts';
+import { executeEnvironmentAppAction } from './action-execute-environment.ts';
+import {
+  executeExternalOwnerManagedUpdateAppAction,
+  executeModuleSyncManagedUpdateAppAction,
+  executeSettingsManagedUpdateApplyAppAction,
+  executeSettingsManagedUpdateCheckAppAction,
+  executeSettingsManagedUpdateRollbackAppAction,
+} from './action-execute-managed-update.ts';
+
+export type AutomationProviderHostActions = Readonly<{
+  inspect(input: Readonly<{
+    provider_id?: string;
+    automation_kind?: 'computer_use' | 'browser_automation';
+    runExternalChecks?: boolean;
+  }>): Promise<Readonly<Record<string, unknown>>>;
+  execute(input: Readonly<{
+    provider_id?: string;
+    automation_kind?: 'computer_use' | 'browser_automation';
+    action_id: string;
+    dry_run?: boolean;
+  }>): Promise<Readonly<Record<string, unknown>>>;
+}>;
+
+export type AppActionExecuteServices = {
+  descriptorDiscovery: Pick<CordisConnectDescriptorDiscoveryService, 'discover'>;
+  familyRuntime: typeof runFamilyRuntime;
+  automationProviderHost?: AutomationProviderHostActions | null;
+};
+
+function requireAgentPackageDelegatedSurface(actionId: string) {
+  const delegatedSurface = agentPackageDelegatedSurface(actionId);
+  if (!delegatedSurface) {
+    throw new FrameworkContractError('contract_shape_invalid', `Unknown Agent Package action catalog entry: ${actionId}.`, {
+      action_id: actionId,
+    });
+  }
+  return delegatedSurface;
+}
+
+function expectedWorkItemControlGeneration(options: AppActionExecuteOptions) {
+  const expectedGeneration = options.payload.expected_generation;
+  if (
+    expectedGeneration !== undefined
+    && expectedGeneration !== null
+    && (!Number.isInteger(expectedGeneration) || (expectedGeneration as number) < 0)
+  ) {
+    throw new FrameworkContractError(
+      'cli_usage_error',
+      `${options.actionId} expected_generation must be a non-negative integer.`,
+      { action_id: options.actionId },
+    );
+  }
+  return expectedGeneration as number | null | undefined;
+}
+
+export async function executeDirectAppAction(
+  contracts: FrameworkContracts,
+  options: AppActionExecuteOptions,
+  services: AppActionExecuteServices,
+) {
+  const refreshWorkspaceSkills = (
+    input: Omit<
+      Parameters<typeof refreshInstalledAgentPackageWorkspaceSkills>[0],
+      'descriptorDiscovery'
+    >,
+  ) => refreshInstalledAgentPackageWorkspaceSkills({
+    ...input,
+    descriptorDiscovery: services.descriptorDiscovery,
+  });
+  const connectionAction = await executeConnectionAppAction(options);
+  if (connectionAction) return connectionAction;
+
+  if (MANAGED_COMPUTER_USE_ACTION_IDS.includes(options.actionId as ManagedComputerUseActionId)) {
+    const actionId = options.actionId as ManagedComputerUseActionId;
+    if (services.automationProviderHost) {
+      return {
+        delegatedSurface: `opl managed companion ${actionId}`,
+        result: options.dryRun
+          ? {
+            surface_kind: 'opl_managed_computer_use_action_preflight',
+            action_id: actionId,
+            status: 'dry_run',
+            current: await services.automationProviderHost.inspect({
+              automation_kind: 'computer_use',
+              runExternalChecks: false,
+            }),
+          }
+          : {
+            surface_kind: 'opl_managed_computer_use_action_result',
+            action_id: actionId,
+            current: await services.automationProviderHost.execute({
+              automation_kind: 'computer_use',
+              action_id: actionId,
+            }),
+          },
+      };
+    }
+    return {
+      delegatedSurface: `opl managed companion ${actionId}`,
+      result: options.dryRun
+        ? {
+          surface_kind: 'opl_managed_computer_use_action_preflight',
+          action_id: actionId,
+          status: 'dry_run',
+          current: inspectManagedComputerUse({ runExternalChecks: false }),
+        }
+        : {
+          surface_kind: 'opl_managed_computer_use_action_result',
+          action_id: actionId,
+          current: reconcileManagedComputerUse(actionId),
+        },
+    };
+  }
+
+  if (MANAGED_BROWSER_AUTOMATION_ACTION_IDS.includes(options.actionId as ManagedBrowserAutomationActionId)) {
+    const actionId = options.actionId as ManagedBrowserAutomationActionId;
+    if (services.automationProviderHost) {
+      return {
+        delegatedSurface: `opl managed companion ${actionId}`,
+        result: options.dryRun
+          ? {
+            surface_kind: 'opl_managed_browser_automation_action_preflight',
+            action_id: actionId,
+            status: 'dry_run',
+            current: await services.automationProviderHost.inspect({
+              automation_kind: 'browser_automation',
+              runExternalChecks: false,
+            }),
+          }
+          : {
+            surface_kind: 'opl_managed_browser_automation_action_result',
+            action_id: actionId,
+            current: await services.automationProviderHost.execute({
+              automation_kind: 'browser_automation',
+              action_id: actionId,
+            }),
+          },
+      };
+    }
+    return {
+      delegatedSurface: `opl managed companion ${actionId}`,
+      result: options.dryRun
+        ? {
+          surface_kind: 'opl_managed_browser_automation_action_preflight',
+          action_id: actionId,
+          status: 'dry_run',
+          current: inspectManagedBrowserAutomation({ runExternalChecks: false }),
+        }
+        : {
+          surface_kind: 'opl_managed_browser_automation_action_result',
+          action_id: actionId,
+          current: reconcileManagedBrowserAutomation(actionId),
+        },
+    };
+  }
+
+  if (options.actionId === 'package_contribution_execute') {
+    const contribution = packageContributionExecutePayload(options.payload);
+    const request = { ...contribution, operation: 'execute' as const };
+    return {
+      delegatedSurface: 'opl app contribution execute',
+      result: options.dryRun
+        ? preflightAppContribution(request, { descriptorDiscovery: services.descriptorDiscovery })
+        : runAppContribution(request, { descriptorDiscovery: services.descriptorDiscovery }),
+    };
+  }
+
+  if (options.actionId === OPL_PACK_PROVISION_SUBMISSION_RESOURCE_ACTION_ID) {
+    return {
+      delegatedSurface: 'opl pack provision-submission-resource',
+      result: provisionSubmissionResource({
+        ...options.payload,
+        dry_run: options.dryRun,
+      }),
+    };
+  }
+
+  if (options.actionId === 'runtime_archive_attempt' || options.actionId === 'runtime_restore_attempt') {
+    const stageAttemptId = stringPayloadField(options.payload, 'stage_attempt_id');
+    if (!stageAttemptId) {
+      throw new FrameworkContractError('cli_usage_error', `${options.actionId} requires stage_attempt_id.`, {
+        action_id: options.actionId,
+        required_payload_fields: ['stage_attempt_id'],
+      });
+    }
+    const archive = options.actionId === 'runtime_archive_attempt';
+    const reason = stringPayloadField(options.payload, 'reason') ?? (archive ? 'user_archived' : 'user_restored');
+    const args = [
+      'attempt',
+      archive ? 'archive' : 'restore',
+      stageAttemptId,
+      '--reason',
+      reason,
+      '--source',
+      'opl-app',
+    ];
+    return {
+      delegatedSurface: `opl family-runtime ${args.join(' ')}`,
+      result: options.dryRun
+        ? {
+            surface_kind: 'opl_runtime_attempt_archive_preflight',
+            action: archive ? 'archive' : 'restore',
+            stage_attempt_id: stageAttemptId,
+            reason,
+            status: 'dry_run',
+          }
+        : await services.familyRuntime(args),
+    };
+  }
+
+  if (options.actionId === 'work_item_execution_session_observe') {
+    const currentProjection = buildOplRuntimeAppState()
+      .app_state.operator.workbench.work_item_projection_v2;
+    const input = options.payload as ObserveWorkItemExecutionSessionInput;
+    const currentItem = resolveWorkItemExecutionSessionObservationTarget(
+      currentProjection.items,
+      input,
+    );
+    return {
+      delegatedSurface: 'OPL work-item coordination-session binding ledger',
+      result: observeWorkItemExecutionSessionBinding(
+        input,
+        { currentItem, dryRun: options.dryRun },
+      ),
+    };
+  }
+
+  if (options.actionId === 'work_item_lifecycle_set') {
+    return {
+      delegatedSurface: 'OPL Ledger work-item control transition',
+      result: setWorkItemControlState({
+        agent_id: stringPayloadField(options.payload, 'agent_id') ?? '',
+        project_id: stringPayloadField(options.payload, 'project_id') ?? '',
+        work_item_id: stringPayloadField(options.payload, 'work_item_id') ?? '',
+        lifecycle_state: stringPayloadField(options.payload, 'lifecycle_state') as WorkItemUserLifecycleState,
+        reason: stringPayloadField(options.payload, 'reason'),
+        source: 'opl_app',
+        expected_generation: expectedWorkItemControlGeneration(options),
+      }, { dryRun: options.dryRun }),
+    };
+  }
+
+  if (options.actionId === 'work_item_visibility_set') {
+    return {
+      delegatedSurface: 'OPL Ledger work-item visibility transition',
+      result: setWorkItemVisibilityState({
+        agent_id: stringPayloadField(options.payload, 'agent_id') ?? '',
+        project_id: stringPayloadField(options.payload, 'project_id') ?? '',
+        work_item_id: stringPayloadField(options.payload, 'work_item_id') ?? '',
+        visibility_state: stringPayloadField(options.payload, 'visibility_state') as WorkItemVisibilityState,
+        reason: stringPayloadField(options.payload, 'reason'),
+        source: 'opl_app',
+        expected_generation: expectedWorkItemControlGeneration(options),
+      }, { dryRun: options.dryRun }),
+    };
+  }
+
+  const codexAction = parseCodexAction(options.actionId);
+  if (codexAction) {
+    return {
+      delegatedSurface: `opl engine ${codexAction} --engine codex`,
+      result: options.dryRun
+        ? dryRunEngineAction(codexAction)
+        : await runOplEngineAction(contracts, codexAction, 'codex'),
+    };
+  }
+
+  const externalManagedUpdateAction = executeExternalOwnerManagedUpdateAppAction(options);
+  if (externalManagedUpdateAction) return externalManagedUpdateAction;
+
+  const moduleAction = parseModuleAction(options.actionId);
+  if (moduleAction) {
+    const moduleId = modulePayload(options.payload);
+    return {
+      delegatedSurface: `opl connect ${moduleAction} --module ${moduleId}`,
+      result: options.dryRun
+        ? dryRunModuleAction(moduleAction, moduleId)
+        : runOplModuleAction(moduleAction, moduleId),
+    };
+  }
+
+  const moduleSyncAction = await executeModuleSyncManagedUpdateAppAction(contracts, options);
+  if (moduleSyncAction) return moduleSyncAction;
+
+  if (options.actionId === 'developer_supervisor') {
+    return {
+      delegatedSurface: 'opl system developer-supervisor',
+      result: options.dryRun
+        ? {
+            system_action: {
+              action: 'developer_supervisor',
+              status: 'dry_run',
+              requested: options.payload,
+            },
+          }
+        : await runOplSystemAction(contracts, 'developer_supervisor', {
+          developerSupervisorEnabled: stringPayloadField(options.payload, 'developerSupervisorEnabled') as 'auto' | 'on' | 'off' | undefined,
+          developerSupervisorMode: stringPayloadField(options.payload, 'developerSupervisorMode') as 'external_observe' | 'developer_apply_safe' | undefined,
+          developerSupervisorAutoEnableGithubLogin:
+            stringPayloadField(options.payload, 'developerSupervisorAutoEnableGithubLogin') ?? undefined,
+          developerSupervisorModuleId:
+            stringPayloadField(options.payload, 'developerSupervisorModuleId') ?? undefined,
+          developerSupervisorModuleSource:
+            stringPayloadField(options.payload, 'developerSupervisorModuleSource') as
+              | 'auto'
+              | 'managed'
+              | 'developer'
+              | undefined,
+        }),
+    };
+  }
+
+  if (options.actionId === 'developer_supervisor_refresh') {
+    return {
+      delegatedSurface: 'opl system developer-supervisor',
+      result: options.dryRun
+        ? {
+            system_action: {
+              action: 'developer_supervisor',
+              status: 'dry_run',
+              requested: {},
+            },
+          }
+        : await runOplSystemAction(contracts, 'developer_supervisor'),
+    };
+  }
+
+  if (options.actionId === 'update_channel') {
+    return {
+      delegatedSurface: 'opl system update-channel',
+      result: options.dryRun
+        ? {
+            system_action: {
+              action: 'update_channel',
+              status: 'dry_run',
+              details: releaseChannelPayload(options.payload),
+            },
+          }
+        : await runOplSystemAction(contracts, 'update_channel', releaseChannelPayload(options.payload)),
+    };
+  }
+
+  if (options.actionId === 'workspace_root_set') {
+    const workspaceRoot = workspaceRootPayload(options.payload);
+    return {
+      delegatedSurface: 'opl workspace root set',
+      result: options.dryRun
+        ? {
+            workspace_root: {
+              selected_path: workspaceRoot,
+              status: 'dry_run',
+            },
+          }
+        : writeOplWorkspaceRootSurface(workspaceRoot),
+    };
+  }
+
+  if (options.actionId === 'codex_user_instructions_set') {
+    const content = options.payload.content;
+    const expectedSha256 = options.payload.expected_sha256;
+    if (typeof content !== 'string' || (expectedSha256 !== null && typeof expectedSha256 !== 'string')) {
+      throw new FrameworkContractError(
+        'cli_usage_error',
+        'codex_user_instructions_set requires string content and string-or-null expected_sha256.',
+        { action_id: options.actionId, required_payload_fields: ['content', 'expected_sha256'] },
+      );
+    }
+    return {
+      delegatedSurface: '$CODEX_HOME/AGENTS.md atomic write',
+      result: writeCodexUserInstructions({
+        content,
+        expectedSha256,
+        dryRun: options.dryRun,
+      }),
+    };
+  }
+
+  if (options.actionId === 'codex_user_instructions_restore_opl_flow_default') {
+    const expectedSha256 = options.payload.expected_sha256;
+    if (expectedSha256 !== null && typeof expectedSha256 !== 'string') {
+      throw new FrameworkContractError(
+        'cli_usage_error',
+        'codex_user_instructions_restore_opl_flow_default requires string-or-null expected_sha256.',
+        { action_id: options.actionId, required_payload_fields: ['expected_sha256'] },
+      );
+    }
+    return {
+      delegatedSurface: 'installed opl-flow package templates/AGENTS.md to $CODEX_HOME/AGENTS.md atomic write',
+      result: restoreCodexUserInstructionsFromOplFlowDefault({
+        expectedSha256,
+        dryRun: options.dryRun,
+      }),
+    };
+  }
+
+  if (options.actionId === 'task_action_receipt_preview') {
+    if (!options.dryRun) {
+      throw new FrameworkContractError('cli_usage_error', 'task_action_receipt_preview is a dry-run App preview only; execute through the domain owner route.', {
+        action_id: options.actionId,
+        required_mode: 'dry_run',
+        can_write_domain_truth: false,
+        can_mutate_artifact_body: false,
+        can_create_owner_receipt: false,
+      });
+    }
+    return {
+      delegatedSurface: 'opl app action execute --action task_action_receipt_preview --dry-run',
+      result: buildTaskActionReceiptPreview(options.payload),
+    };
+  }
+
+  if (options.actionId === 'task_export_bundle_preview') {
+    if (!options.dryRun) {
+      throw new FrameworkContractError('cli_usage_error', 'task_export_bundle_preview is a dry-run App preview only; generate bundles through the domain owner route.', {
+        action_id: options.actionId,
+        required_mode: 'dry_run',
+        can_generate_domain_export_bundle: false,
+        can_write_domain_truth: false,
+        can_create_owner_receipt: false,
+      });
+    }
+    return {
+      delegatedSurface: 'opl app action execute --action task_export_bundle_preview --dry-run',
+      result: buildTaskExportBundlePreview(options.payload),
+    };
+  }
+
+  if (options.actionId === 'settings_repair_model_access') {
+    return {
+      delegatedSurface: 'opl system developer-supervisor',
+      result: options.dryRun
+        ? buildSettingsControlCenterDryRun(options.actionId, options.payload)
+        : await runOplSystemAction(contracts, 'developer_supervisor', {
+          developerSupervisorEnabled: stringPayloadField(options.payload, 'developerSupervisorEnabled') as 'auto' | 'on' | 'off' | undefined,
+          developerSupervisorMode: stringPayloadField(options.payload, 'developerSupervisorMode') as 'external_observe' | 'developer_apply_safe' | undefined,
+          developerSupervisorAutoEnableGithubLogin:
+            stringPayloadField(options.payload, 'developerSupervisorAutoEnableGithubLogin') ?? undefined,
+        }),
+    };
+  }
+
+  if (options.actionId === 'settings_verify_workspace') {
+    const workspacePath = settingsVerifyWorkspacePayload(options.payload);
+    return {
+      delegatedSurface: 'opl workspace health',
+      result: options.dryRun
+        ? buildSettingsControlCenterDryRun(options.actionId, options.payload)
+        : executeWorkspaceAppAction(contracts, {
+          actionId: 'workspace_health',
+          payload: { workspace_path: workspacePath },
+          dryRun: false,
+        }, { refreshWorkspaceSkills })?.result,
+    };
+  }
+
+  const settingsManagedUpdateApplyAction = await executeSettingsManagedUpdateApplyAppAction(contracts, options);
+  if (settingsManagedUpdateApplyAction) return settingsManagedUpdateApplyAction;
+
+  if (options.actionId === 'agent_package_install') {
+    const installPayload = agentPackageInstallPayload(options.payload);
+    return {
+      delegatedSurface: requireAgentPackageDelegatedSurface(options.actionId),
+      result: await runOplAgentPackageInstall({
+        ...installPayload,
+        dryRun: options.dryRun,
+      }),
+    };
+  }
+
+  if (options.actionId === 'install_from_manifest_url') {
+    return {
+      delegatedSurface: requireAgentPackageDelegatedSurface(options.actionId),
+      result: await runOplAgentPackageInstall({
+        ...agentPackageManifestInstallPayload(options.payload),
+        dryRun: options.dryRun,
+      }),
+    };
+  }
+
+  if (options.actionId === 'agent_package_update') {
+    const installPayload = agentPackageInstallPayload(options.payload);
+    return {
+      delegatedSurface: requireAgentPackageDelegatedSurface(options.actionId),
+      result: await runOplAgentPackageUpdate({
+        ...installPayload,
+        dryRun: options.dryRun,
+      }),
+    };
+  }
+
+  if (options.actionId === 'agent_package_repair') {
+    return {
+      delegatedSurface: requireAgentPackageDelegatedSurface(options.actionId),
+      result: await runOplAgentPackageRepair({
+        ...agentPackageIdPayload(options.actionId, options.payload),
+        dryRun: options.dryRun,
+      }),
+    };
+  }
+
+  if (options.actionId === 'agent_package_uninstall') {
+    return {
+      delegatedSurface: requireAgentPackageDelegatedSurface(options.actionId),
+      result: await runOplAgentPackageUninstall({
+        ...agentPackageIdPayload(options.actionId, options.payload),
+        dryRun: options.dryRun,
+      }),
+    };
+  }
+
+  if (options.actionId === 'agent_package_preferences_set') {
+    const preferencesPayload = agentPackagePreferencesPayload(options.payload);
+    if (preferencesPayload.exposureAction) {
+      return {
+        delegatedSurface: `opl packages ${preferencesPayload.exposureAction} --package-id <package_id>`,
+        result: await runOplAgentPackageExposureAction(preferencesPayload.exposureAction, {
+          packageId: preferencesPayload.packageId,
+          dryRun: options.dryRun,
+        }),
+      };
+    }
+    return {
+      delegatedSurface: 'opl packages preferences set --package-id <package_id> --shortcut-id <shortcut_id>',
+      result: await runOplAgentPackageHomeShortcutPreferencesSet({
+        packageId: preferencesPayload.packageId,
+        shortcutId: preferencesPayload.shortcutId,
+        visible: preferencesPayload.visible,
+        sortOrder: preferencesPayload.sortOrder,
+        dryRun: options.dryRun,
+      }),
+    };
+  }
+
+  const settingsManagedUpdateCheckAction = await executeSettingsManagedUpdateCheckAppAction(contracts, options);
+  if (settingsManagedUpdateCheckAction) return settingsManagedUpdateCheckAction;
+
+  if (options.actionId === 'settings_prune_runtime_roots_dry_run') {
+    return {
+      delegatedSurface: 'opl settings control-center cleanup_plan --dry-run',
+      result: buildSettingsPruneRuntimeRootsPlan(),
+    };
+  }
+
+  if (options.actionId === 'settings_inventory_agent_package_store') {
+    const action = buildSettingsControlCenterDryRun(options.actionId, options.payload);
+    return {
+      delegatedSurface: 'opl app action execute --action settings_inventory_agent_package_store',
+      result: {
+        settings_control_center_action: action.settings_control_center_action,
+        agent_package_store: buildAgentPackageStoreStorageInventory({ persist: !options.dryRun }),
+      },
+    };
+  }
+
+  if (options.actionId === 'settings_inventory_webui_data_volume') {
+    const action = buildSettingsControlCenterDryRun(options.actionId, options.payload);
+    return {
+      delegatedSurface: 'opl app action execute --action settings_inventory_webui_data_volume',
+      result: {
+        settings_control_center_action: action.settings_control_center_action,
+        webui_data_volume: buildWebuiDataVolumeStorageInventory({ persist: !options.dryRun }),
+      },
+    };
+  }
+
+  const settingsManagedUpdateRollbackAction = executeSettingsManagedUpdateRollbackAppAction(options);
+  if (settingsManagedUpdateRollbackAction) return settingsManagedUpdateRollbackAction;
+
+  if (options.actionId === 'settings_install_docker_webui') {
+    return {
+      delegatedSurface: 'opl install --headless',
+      result: options.dryRun
+        ? buildDockerWebuiSettingsManualAction(options.actionId, ['opl', 'install', '--headless', '--json'], options.payload)
+        : await runOplTurnkeyInstall(contracts, { headless: true }),
+    };
+  }
+
+  if (options.actionId === 'settings_configure_webui_api_key') {
+    return {
+      delegatedSurface: 'printf <api-key> | opl system configure-codex --api-key-stdin',
+      result: buildDockerWebuiSettingsManualAction(
+        options.actionId,
+        ['printf', '<api-key>', '|', 'opl', 'system', 'configure-codex', '--api-key-stdin', '--json'],
+        options.payload,
+      ),
+    };
+  }
+
+  const environmentAction = await executeEnvironmentAppAction(contracts, options);
+  if (environmentAction) return environmentAction;
+
+  if (options.actionId === 'settings_run_webui_startup_maintenance') {
+    return {
+      delegatedSurface: 'opl system startup-maintenance',
+      result: options.dryRun
+        ? buildDockerWebuiSettingsManualAction(options.actionId, ['opl', 'system', 'startup-maintenance', '--json'], options.payload)
+        : await runOplSystemAction(contracts, 'startup_maintenance'),
+    };
+  }
+
+  if (options.actionId === 'settings_open_docker_webui') {
+    const doctor = buildOplDockerWebuiDoctor();
+    return {
+      delegatedSurface: 'opl system docker-webui doctor --json#docker_webui_doctor.browser.url',
+      result: {
+        docker_webui_browser_entry: {
+          surface_kind: 'opl_docker_webui_browser_entry.v1',
+          action_id: options.actionId,
+          status: doctor.docker_webui_doctor.browser.url ? 'url_available' : 'url_not_visible',
+          browser_url: doctor.docker_webui_doctor.browser.url,
+          verify_action_id: 'settings_diagnose_docker_webui',
+          doctor_summary: doctor.docker_webui_doctor.diagnostic_summary,
+          authority_boundary: {
+            mutates: 'none_read_only',
+            shell_owns_browser_navigation: true,
+            can_claim_runtime_ready: false,
+            can_claim_app_release_ready: false,
+          },
+        },
+      },
+    };
+  }
+
+  if (options.actionId === 'settings_diagnose_docker_webui') {
+    return {
+      delegatedSurface: 'opl system docker-webui doctor',
+      result: buildOplDockerWebuiDoctor(),
+    };
+  }
+
+  const workspaceAction = executeWorkspaceAppAction(contracts, options, {
+    refreshWorkspaceSkills,
+  });
+  if (workspaceAction) {
+    return workspaceAction;
+  }
+
+  const gatewayActions = new Set([
+    'gateway_account_complete_setup',
+    'gateway_account_refresh',
+    'gateway_account_repair',
+    'gateway_account_use_for_model_access',
+    'gateway_account_disconnect',
+  ]);
+  if (gatewayActions.has(options.actionId)) {
+    if (options.dryRun) {
+      throw new FrameworkContractError('cli_usage_error', 'OPL Gateway account actions do not support dry-run.', {
+        reason_code: 'gateway_account_dry_run_unsupported',
+      });
+    }
+    const allowedFields = options.actionId === 'gateway_account_complete_setup' || options.actionId === 'gateway_account_repair'
+      ? new Set(['group_id'])
+      : new Set<string>();
+    const extraFields = Object.keys(options.payload).filter((field) => !allowedFields.has(field));
+    if (extraFields.length > 0) {
+      throw new FrameworkContractError('cli_usage_error', 'OPL Gateway account actions reject secret or unknown payload fields.', {
+        reason_code: 'gateway_account_payload_forbidden',
+        fields: extraFields,
+      });
+    }
+    if (options.actionId === 'gateway_account_complete_setup') {
+      const groupId = stringPayloadField(options.payload, 'group_id');
+      if (!groupId) {
+        throw new FrameworkContractError('cli_usage_error', 'gateway_account_complete_setup requires payload.group_id.', {
+          reason_code: 'gateway_group_required',
+        });
+      }
+      return { delegatedSurface: 'opl connect gateway complete-setup --group-id <id>', result: await completeOplGatewaySetup(groupId) };
+    }
+    if (options.actionId === 'gateway_account_refresh') {
+      return { delegatedSurface: 'opl connect gateway refresh', result: await refreshOplGatewayAccount() };
+    }
+    if (options.actionId === 'gateway_account_repair') {
+      const groupId = typeof options.payload.group_id === 'string' ? options.payload.group_id : undefined;
+      return { delegatedSurface: 'opl connect gateway repair', result: await repairOplGatewayAccount(groupId) };
+    }
+    if (options.actionId === 'gateway_account_use_for_model_access') {
+      return { delegatedSurface: 'opl connect gateway use-for-model-access', result: await useOplGatewayForModelAccess() };
+    }
+    return { delegatedSurface: 'opl connect gateway disconnect', result: await disconnectOplGatewayAccount() };
+  }
+
+  const providerAction = await executeProviderAppAction(options, services.familyRuntime);
+  if (providerAction) return providerAction;
+
+  return null;
+}
