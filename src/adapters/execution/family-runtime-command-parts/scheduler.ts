@@ -6,6 +6,10 @@ import type {
 } from '../family-runtime-command.ts';
 import { assertProviderKind, assertSchedulerDomainId, parseCliOptions } from './shared.ts';
 
+import { DatabaseSync } from 'node:sqlite';
+import { familyRuntimePaths } from '../family-runtime-store.ts';
+import { runTemporalSchedulerCadenceCommand } from '../family-runtime-scheduler.ts';
+
 export function parseSchedulerLifecycleArgs(rest: string[]): FamilyRuntimeCommandInput {
   const action = rest[0];
   let providerKind: FamilyRuntimeProviderKind | undefined;
@@ -45,4 +49,25 @@ export function parseSchedulerLifecycleArgs(rest: string[]): FamilyRuntimeComman
     providerKind,
     domainProfiles,
   };
+}
+
+
+export async function runFamilyRuntimeSchedulerCommand(context: {
+  db: DatabaseSync;
+  paths: ReturnType<typeof familyRuntimePaths>;
+  parsed: FamilyRuntimeCommandInput;
+}): Promise<Record<string, unknown>> {
+  const { db, paths, parsed } = context;
+  if (
+    parsed.mode === 'scheduler_status'
+    || parsed.mode === 'scheduler_install'
+    || parsed.mode === 'scheduler_remove'
+    || parsed.mode === 'scheduler_trigger'
+  ) {
+    return {
+      version: 'g2',
+      family_runtime_scheduler_cadence: await runTemporalSchedulerCadenceCommand(db, paths, parsed),
+    };
+  }
+  throw new Error(`Unhandled family runtime scheduler mode: ${(parsed as { mode: string }).mode}`);
 }

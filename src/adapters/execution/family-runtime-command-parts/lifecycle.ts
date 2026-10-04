@@ -3,6 +3,11 @@ import type { FamilyRuntimeDomainId } from '../family-runtime-types.ts';
 import type { FamilyRuntimeCommandInput } from '../family-runtime-command.ts';
 import { assertDomainId, parseCliOptions, parsePayload, parsePayloadFile } from './shared.ts';
 
+import {
+  reconcileFamilyRuntimeLifecycleRefs,
+  runFamilyRuntimeLifecycleApply,
+} from '../family-runtime-lifecycle-index.ts';
+
 export function parseLifecycleApplyArgs(rest: string[]): FamilyRuntimeCommandInput {
   let applyMode: 'dry-run' | 'apply' | 'verify' = 'dry-run';
   let domainId = '';
@@ -124,4 +129,23 @@ export function parseLifecycleReconcileArgs(rest: string[]): FamilyRuntimeComman
       max_age_ms: maxAgeMs ?? null,
     },
   };
+}
+
+
+export function runFamilyRuntimeLifecycleCommand(
+  parsed: FamilyRuntimeCommandInput,
+): Record<string, unknown> {
+  if (parsed.mode === 'lifecycle_apply') {
+    return {
+      version: 'g2',
+      family_runtime_lifecycle_apply: runFamilyRuntimeLifecycleApply(parsed.input),
+    };
+  }
+  if (parsed.mode === 'lifecycle_reconcile') {
+    return {
+      version: 'g2',
+      family_runtime_lifecycle_reconcile: reconcileFamilyRuntimeLifecycleRefs(parsed.input),
+    };
+  }
+  throw new Error(`Unhandled family runtime lifecycle mode: ${(parsed as { mode: string }).mode}`);
 }
