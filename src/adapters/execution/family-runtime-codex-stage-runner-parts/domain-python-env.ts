@@ -60,7 +60,8 @@ function resolvePythonBinDir(env: NodeJS.ProcessEnv, minimum: number[]) {
     ?? path.join(optionalString(env.HOME) ?? os.homedir(), '.local', 'share', 'uv', 'python');
   const managed = fs.existsSync(installDir) ? fs.readdirSync(installDir).sort().reverse()
     .map((entry) => path.join(installDir, entry, 'bin', 'python3')) : [];
-  for (const command of [...managed, 'python3']) {
+  // Keep a compatible inherited environment and its installed packages; uv is recovery only.
+  for (const command of ['python3', ...managed]) {
     const dir = pythonBin(command, [], env, minimum);
     if (dir) return dir;
   }

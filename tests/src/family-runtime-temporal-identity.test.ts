@@ -310,6 +310,8 @@ test('Codex domain child imports both owners and preserves inherited Python path
     assert.equal(observed[0], path.join(source, 'domain_probe.py'));
     assert.ok(observed[1].startsWith(domainPythonTesting.FRAMEWORK_PYTHON_ROOT));
     assert.ok(observed[2][0] > 3 || observed[2][1] >= 12);
+    const inheritedPython = spawnSync('python3', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' });
+    assert.equal(env.PATH?.split(path.delimiter)[0], path.dirname(inheritedPython.stdout.trim()));
     assert.equal(fs.existsSync(path.join(source, '__pycache__')), false);
     const sandbox = codexStageAttemptEnv({ attempt: record, workspaceRoot: pack, domainPython: false });
     assert.equal(sandbox.PYTHONPATH, undefined);
