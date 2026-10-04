@@ -250,7 +250,7 @@ test('formal quality Attempt uses one same-thread closeout-only resume without c
     assert.match(invocation, /non-empty closeout_refs array/);
     assert.match(invocation, /closeout_ref_metadata with the identical ref/);
     assert.match(invocation, /kind "stage_attempt_closeout_packet"/);
-    assert.match(invocation, /exact sha256, and exact size_bytes when known/);
+    assert.match(invocation, /Include sha256 and size_bytes only if you already know them exactly/);
     assert.match(invocation, /Never output typed_closeout_ref_metadata/);
     const expectedExecutorCwd = fs.realpathSync(canonicalWorkItemRoot);
     assert.ok(invocation.includes(`initial:${expectedExecutorCwd}\n`));
