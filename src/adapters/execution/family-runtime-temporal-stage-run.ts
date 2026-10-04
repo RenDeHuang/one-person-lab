@@ -163,7 +163,7 @@ export type TemporalStageQualityCycleProjectionInput = {
 
 export type TemporalStageQualityAttemptSyncInput = {
   attempt_ref: string;
-  workflow_state: import('./family-runtime-temporal.ts').TemporalStageAttemptWorkflowState;
+  workflow_state: import('./family-runtime-temporal-contract.ts').TemporalStageAttemptWorkflowState;
 };
 
 export type TemporalStageQualityReviewReceiptInput = {
