@@ -59,7 +59,6 @@ export async function runAttemptSignalCommand(
     },
   };
 }
-
 export type AttemptFixtureCommandContext = FamilyRuntimeAttemptCommandContext & {
   parsed: Extract<FamilyRuntimeCommandInput, { mode: 'attempt_fixture_run' }>;
 };
@@ -88,4 +87,3 @@ export function runAttemptFixtureCommand(
     },
   };
 }
-
