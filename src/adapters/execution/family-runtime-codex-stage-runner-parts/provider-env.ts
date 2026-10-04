@@ -3,6 +3,7 @@ import { executionScopeEnvironment } from '../../../authority/workspace/index.ts
 import { stageAttemptPackageClosureIdentity } from '../family-runtime-stage-run-identity.ts';
 import { requireFamilyRuntimeExecutionScope } from '../family-runtime-execution-scope.ts';
 import { isRecord, type JsonRecord } from './shared.ts';
+import { domainPythonEnvironment } from './domain-python-env.ts';
 
 function readRecordList(value: unknown) {
   if (!Array.isArray(value)) {
@@ -121,5 +122,6 @@ export function codexStageAttemptEnv(input: {
     OPL_SOURCE_FINGERPRINT: sourceFingerprint ?? undefined,
     OPL_IDEMPOTENCY_KEY: idempotencyKey ?? undefined,
     OPL_STAGE_MANIFEST_REF: stageManifestRef ?? undefined,
+    ...domainPythonEnvironment({ attempt: input.attempt }),
   };
 }
