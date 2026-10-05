@@ -253,21 +253,87 @@ function controlledEnv(extra: NodeJS.ProcessEnv = {}) {
   };
 }
 
+const HANDLER_PYTHON_MIN_VERSION: readonly [number, number] = [3, 11];
+
+function pythonMajorMinor(executable: string): [number, number] | null {
+  const probe = spawnSync(
+    executable,
+    ['-I', '-B', '-c', 'import sys; print(str(sys.version_info[0]) + "." + str(sys.version_info[1]))'],
+    { encoding: 'utf8', timeout: 10_000 },
+  );
+  if (probe.status !== 0 || typeof probe.stdout !== 'string') return null;
+  const match = /^(\d+)\.(\d+)$/.exec(probe.stdout.trim());
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2])];
+}
+
+function pythonMeetsMinimum(version: readonly [number, number]) {
+  const [major, minor] = version;
+  const [floorMajor, floorMinor] = HANDLER_PYTHON_MIN_VERSION;
+  return major > floorMajor || (major === floorMajor && minor >= floorMinor);
+}
+
 function resolvePython(checkoutRoot: string) {
+  // Standard Agent handlers run framework Python that uses PEP 604 unions in
+  // runtime-evaluated positions and stdlib introduced in 3.11 (for example
+  // ``tomllib``). A host ``python3`` may still be an older interpreter, so the
+  // candidate must be probed rather than assumed: silently selecting a too-old
+  // interpreter turns a version mismatch into an opaque ``X | None`` TypeError
+  // deep inside the handler.
+  const requiredMinVersion = HANDLER_PYTHON_MIN_VERSION.join('.');
+  const observed: Array<{ executable: string; version: string | null }> = [];
+  const explicit = process.env.OPL_STANDARD_AGENT_PYTHON?.trim();
+  // An explicit operator override is authoritative: if it exists but does not
+  // meet the framework Python floor we fail closed instead of silently ignoring
+  // the operator's choice and picking another interpreter.
+  if (explicit) {
+    if (!fs.existsSync(explicit)) {
+      throw new FrameworkContractError(
+        'surface_not_found',
+        'OPL_STANDARD_AGENT_PYTHON does not resolve to an existing Python executable.',
+        { executable: explicit, required_min_version: requiredMinVersion, failure_code: 'standard_agent_handler_python_override_missing' },
+      );
+    }
+    const version = pythonMajorMinor(explicit);
+    if (!version || !pythonMeetsMinimum(version)) {
+      throw new FrameworkContractError(
+        'surface_not_found',
+        'OPL_STANDARD_AGENT_PYTHON does not meet the Standard Agent handler minimum version.',
+        {
+          executable: explicit,
+          observed_version: version ? version.join('.') : null,
+          required_min_version: requiredMinVersion,
+          failure_code: 'standard_agent_handler_python_min_version_unmet',
+        },
+      );
+    }
+    return explicit;
+  }
   const candidates = [
-    process.env.OPL_STANDARD_AGENT_PYTHON,
     path.join(checkoutRoot, '.venv', 'bin', 'python'),
     path.join(checkoutRoot, '.venv', 'bin', 'python3'),
+    '/opt/homebrew/bin/python3.13',
+    '/opt/homebrew/bin/python3.12',
+    '/opt/homebrew/bin/python3.11',
     '/opt/homebrew/bin/python3',
     '/usr/bin/python3',
-  ].filter((entry): entry is string => Boolean(entry));
-  const selected = candidates.find((entry) => entry.includes(path.sep) ? fs.existsSync(entry) : true);
-  if (!selected) {
-    throw new FrameworkContractError('surface_not_found', 'No Python runtime is available for the Standard Agent handler.', {
-      checkout_root: checkoutRoot,
-    });
+  ];
+  for (const candidate of candidates) {
+    if (candidate.includes(path.sep) && !fs.existsSync(candidate)) continue;
+    const version = pythonMajorMinor(candidate);
+    observed.push({ executable: candidate, version: version ? version.join('.') : null });
+    if (version && pythonMeetsMinimum(version)) return candidate;
   }
-  return selected;
+  throw new FrameworkContractError(
+    'surface_not_found',
+    'No Python runtime meeting the Standard Agent handler minimum version is available.',
+    {
+      checkout_root: checkoutRoot,
+      required_min_version: requiredMinVersion,
+      observed,
+      failure_code: 'standard_agent_handler_python_min_version_unmet',
+    },
+  );
 }
 
 function parseSingleCanonicalJson(stdout: string) {

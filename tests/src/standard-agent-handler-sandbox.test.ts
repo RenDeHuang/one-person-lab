@@ -235,3 +235,76 @@ test('handler sandbox rejects a canonical Study root replaced by a sibling symli
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }
 });
+
+test('handler sandbox fails closed when OPL_STANDARD_AGENT_PYTHON points at a missing executable', () => {
+  const checkoutRoot = fixtureRoot();
+  fs.mkdirSync(path.join(checkoutRoot, 'src', 'sample'), { recursive: true });
+  fs.writeFileSync(path.join(checkoutRoot, 'src', 'sample', '__init__.py'), '');
+  fs.writeFileSync(path.join(checkoutRoot, 'src', 'sample', 'handler.py'), [
+    'def evaluate(request):',
+    '    return {"ok": True}',
+    '',
+  ].join('\n'));
+  const previous = process.env.OPL_STANDARD_AGENT_PYTHON;
+  process.env.OPL_STANDARD_AGENT_PYTHON = path.join(checkoutRoot, 'missing-python');
+  try {
+    assert.throws(
+      () => runStandardAgentHandlerSandbox({
+        checkoutRoot,
+        workspaceRoot: checkoutRoot,
+        workspaceReadRoot: checkoutRoot,
+        binding: { kind: 'python_callable', module: 'sample.handler', callable: 'evaluate' },
+        request: {},
+      }),
+      (error: unknown) => {
+        assert.equal(
+          (error as { details?: Record<string, unknown> }).details?.failure_code,
+          'standard_agent_handler_python_override_missing',
+        );
+        return true;
+      },
+    );
+  } finally {
+    if (previous === undefined) delete process.env.OPL_STANDARD_AGENT_PYTHON;
+    else process.env.OPL_STANDARD_AGENT_PYTHON = previous;
+    fs.rmSync(checkoutRoot, { recursive: true, force: true });
+  }
+});
+
+test('handler sandbox fails closed when an explicit Python override is below the framework floor', () => {
+  const checkoutRoot = fixtureRoot();
+  fs.mkdirSync(path.join(checkoutRoot, 'src', 'sample'), { recursive: true });
+  fs.writeFileSync(path.join(checkoutRoot, 'src', 'sample', '__init__.py'), '');
+  fs.writeFileSync(path.join(checkoutRoot, 'src', 'sample', 'handler.py'), [
+    'def evaluate(request):',
+    '    return {"ok": True}',
+    '',
+  ].join('\n'));
+  const fakePython = path.join(checkoutRoot, 'python3-fake');
+  fs.writeFileSync(fakePython, '#!/bin/sh\necho 3.9\n');
+  fs.chmodSync(fakePython, 0o755);
+  const previous = process.env.OPL_STANDARD_AGENT_PYTHON;
+  process.env.OPL_STANDARD_AGENT_PYTHON = fakePython;
+  try {
+    assert.throws(
+      () => runStandardAgentHandlerSandbox({
+        checkoutRoot,
+        workspaceRoot: checkoutRoot,
+        workspaceReadRoot: checkoutRoot,
+        binding: { kind: 'python_callable', module: 'sample.handler', callable: 'evaluate' },
+        request: {},
+      }),
+      (error: unknown) => {
+        const details = (error as { details?: Record<string, unknown> }).details;
+        assert.equal(details?.failure_code, 'standard_agent_handler_python_min_version_unmet');
+        assert.equal(details?.observed_version, '3.9');
+        assert.equal(details?.required_min_version, '3.11');
+        return true;
+      },
+    );
+  } finally {
+    if (previous === undefined) delete process.env.OPL_STANDARD_AGENT_PYTHON;
+    else process.env.OPL_STANDARD_AGENT_PYTHON = previous;
+    fs.rmSync(checkoutRoot, { recursive: true, force: true });
+  }
+});
