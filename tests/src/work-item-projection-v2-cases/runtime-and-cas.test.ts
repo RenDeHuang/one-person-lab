@@ -543,6 +543,85 @@ test('expired Temporal runtime observation stays queued with a diagnostic and do
   }
 });
 
+test('expired runtime observation disproves a persisted running provider snapshot', () => {
+  const now = Date.parse('2026-10-05T12:00:00.000Z');
+  const observedAt = new Date(now - 20 * 60_000);
+  const currentness = buildStageAttemptRuntimeCurrentness({
+    ledgerStatus: 'running',
+    providerKind: 'temporal',
+    providerRun: {
+      provider_status: 'running',
+      last_heartbeat_at: observedAt.toISOString(),
+      runtime_observation: {
+        observed_at: observedAt.toISOString(),
+        ttl_ms: 10 * 60_000,
+        expires_at: new Date(observedAt.getTime() + 10 * 60_000).toISOString(),
+        workflow_status: 'running',
+      },
+    },
+    nowMs: now,
+  });
+
+  assert.equal(currentness.running_proof_status, 'not_running');
+  assert.equal(currentness.effective_runtime_status, 'not_running');
+  assert.equal(currentness.projection_status, 'stale_projection');
+  assert.equal(currentness.reason, 'ledger_running_with_expired_runtime_observation');
+  assert.equal(currentness.observed_runtime_observation_freshness, 'expired');
+  assert.deepEqual(currentness.running_proof_sources, []);
+});
+
+test('fresh runtime observation still confirms a running provider snapshot', () => {
+  const now = Date.parse('2026-10-05T12:00:00.000Z');
+  const observedAt = new Date(now - 60_000);
+  const currentness = buildStageAttemptRuntimeCurrentness({
+    ledgerStatus: 'running',
+    providerKind: 'temporal',
+    providerRun: {
+      provider_status: 'running',
+      last_heartbeat_at: observedAt.toISOString(),
+      runtime_observation: {
+        observed_at: observedAt.toISOString(),
+        ttl_ms: 10 * 60_000,
+        expires_at: new Date(observedAt.getTime() + 10 * 60_000).toISOString(),
+        workflow_status: 'running',
+      },
+    },
+    nowMs: now,
+  });
+
+  assert.equal(currentness.running_proof_status, 'running_confirmed');
+  assert.equal(currentness.effective_runtime_status, 'running');
+  assert.equal(currentness.observed_runtime_observation_freshness, 'fresh');
+  assert.deepEqual(currentness.running_proof_sources, ['provider_run']);
+});
+
+test('a live Temporal query still confirms running despite an expired observation', () => {
+  const now = Date.parse('2026-10-05T12:00:00.000Z');
+  const observedAt = new Date(now - 20 * 60_000);
+  const currentness = buildStageAttemptRuntimeCurrentness({
+    ledgerStatus: 'running',
+    providerKind: 'temporal',
+    providerRun: {
+      provider_status: 'running',
+      runtime_observation: {
+        observed_at: observedAt.toISOString(),
+        ttl_ms: 10 * 60_000,
+        expires_at: new Date(observedAt.getTime() + 10 * 60_000).toISOString(),
+        workflow_status: 'running',
+      },
+    },
+    temporalQuery: { workflow_status: 'RUNNING', query: { status: 'running' } },
+    nowMs: now,
+  });
+
+  assert.equal(currentness.running_proof_status, 'running_confirmed');
+  assert.equal(currentness.effective_runtime_status, 'running');
+  assert.deepEqual(currentness.running_proof_sources, [
+    'temporal_workflow_visibility',
+    'temporal_workflow_query',
+  ]);
+});
+
 test('Temporal running query overrides a lagging queued attempt ledger', () => {
   const currentness = buildStageAttemptRuntimeCurrentness({
     ledgerStatus: 'queued',
