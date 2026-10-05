@@ -6,10 +6,14 @@ import {
   path,
   repoRoot,
   runCli,
+  runCliInCwd,
   runCliFailure,
   test,
 } from '../helpers.ts';
-import { createWorkspaceFixture } from './workspace-domain-test-helper.ts';
+import {
+  createWorkspaceDescriptorFamilyFixture,
+  createWorkspaceFixture,
+} from './workspace-domain-test-helper.ts';
 
 function writeRegistry(
   stateRoot: string,
@@ -105,6 +109,24 @@ test('workspace registry owns bind, list, and archive lifecycle only', () => {
     assert.equal(archived.binding.status, 'archived');
   } finally {
     fs.rmSync(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test('workspace catalog ignores an agent checkout used as the caller cwd for the OPL project', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-workspace-cwd-state-'));
+  const descriptorFixture = createWorkspaceDescriptorFamilyFixture(['mas']);
+  const agentCwd = path.join(descriptorFixture.familyRoot, 'med-autoscience');
+  try {
+    const output = runCliInCwd(['workspace', 'list'], agentCwd, {
+      OPL_STATE_DIR: stateRoot,
+      OPL_FAMILY_WORKSPACE_ROOT: descriptorFixture.familyRoot,
+    });
+    const oplProject = output.workspace_catalog.projects.find((entry: { project_id: string }) =>
+      entry.project_id === 'opl');
+    assert.equal(oplProject.project, 'one-person-lab');
+  } finally {
+    fs.rmSync(stateRoot, { recursive: true, force: true });
+    descriptorFixture.cleanup();
   }
 });
 

@@ -93,7 +93,7 @@ function buildProjectBindingContract(
   const resolved = resolveStandardAgentInterfaceForWorkspace(
     projectId,
     projectName,
-    activeBinding?.workspace_path ?? process.cwd(),
+    activeBinding?.workspace_path,
     activeBinding?.direct_entry.workspace_locator?.workspace_root,
   );
   if (resolved) {

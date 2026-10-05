@@ -76,7 +76,7 @@ function normalizeExistingDirectoryPath(directoryPath: string | undefined, field
 export function resolveStandardAgentInterfaceForWorkspace(
   projectId: string,
   project: string,
-  workspacePath: string,
+  workspacePath: string | null | undefined,
   workspaceRoot?: string | null,
 ) {
   const packageManaged = readAgentPackageReadinessPort()
@@ -91,7 +91,7 @@ export function resolveStandardAgentInterfaceForWorkspace(
   const configuredFamilyRoot = normalizeOptionalString(process.env.OPL_FAMILY_WORKSPACE_ROOT);
   const candidates = [
     normalizeOptionalString(workspaceRoot),
-    workspacePath,
+    normalizeOptionalString(workspacePath),
     configuredFamilyRoot ? path.join(configuredFamilyRoot, project) : null,
   ].filter((entry): entry is string => Boolean(entry));
 
