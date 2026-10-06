@@ -65,6 +65,7 @@ export type StandardAgentStageReviewLaneBinding =
 export type StandardAgentStageQualityRuntimeBinding = {
   surface_kind: 'opl_pack_bound_stage_quality_runtime_binding';
   version: 'opl-pack-bound-stage-quality-runtime-binding.v1';
+  compile_mode?: 'target_stage_binding';
   stage_id: string;
   declared_stage_ids: string[];
   enabled: boolean;
@@ -90,4 +91,19 @@ export type StandardAgentStageQualityRuntimeBinding = {
   lineage_refs: string[];
   manifest_ref: typeof STANDARD_AGENT_STAGE_MANIFEST_REF;
   manifest_sha256: string;
+};
+
+export type StandardAgentStageTargetBinding = {
+  domainId: string;
+  stage: JsonRecord;
+  stageContract: JsonRecord;
+  stagePolicyRef: string;
+  stageIndex: number;
+  declaredStageIds: string[];
+  manifestSha256: string;
+  policyRef: string | null;
+  policy: StandardAgentStageQualityPolicy | null;
+  metaReviewPolicy: JsonRecord | null;
+  handoffReviewBoundary: StandardAgentHandoffReviewBoundary | null;
+  qualityProfileRef: string | null;
 };

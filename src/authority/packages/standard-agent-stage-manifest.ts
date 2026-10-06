@@ -1,4 +1,5 @@
 import {
+  resolveStandardAgentStageTargetBinding,
   resolveStandardAgentStageQualityRuntimeBinding as resolveStageQualityRuntimeBinding,
 } from './standard-agent-stage-manifest-parts/runtime-quality-binding.ts';
 import type {
@@ -12,6 +13,8 @@ export {
   OFFICIAL_KNOWLEDGE_DELIVERABLE_QUALITY_PROFILE,
   STANDARD_AGENT_DESCRIPTOR_REF,
 } from './standard-agent-stage-manifest-parts/manifest-compiler.ts';
+
+export { resolveStandardAgentStageTargetBinding };
 
 export function resolveStandardAgentStageQualityRuntimeBinding(
   repoDirInput: string,
@@ -30,5 +33,6 @@ export type {
   StandardAgentStageManifestCompilation,
   StandardAgentStageQualityPolicy,
   StandardAgentStageQualityRuntimeBinding,
+  StandardAgentStageTargetBinding,
   StandardAgentStageReviewLaneBinding,
 } from './standard-agent-stage-manifest-parts/types.ts';

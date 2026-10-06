@@ -13,7 +13,10 @@ import {
   validateDesignRequest,
   type FoundryProviderManifest,
 } from '../../../authority/evolution/index.ts';
-import { compileStandardAgentStageManifest } from '../../../authority/packages/public/standard-agent-action-runtime.ts';
+import {
+  compileStandardAgentStageManifest,
+  resolveStandardAgentStageTargetBinding,
+} from '../../../authority/packages/public/standard-agent-action-runtime.ts';
 import {
   createWorkItemExecutionScopeSnapshot,
   listWorkspaceBindings,
@@ -57,6 +60,7 @@ export type StandardAgentActionContext = {
 
 type ActionContextDependencies = {
   compileStageManifest?: typeof compileStandardAgentStageManifest;
+  resolveTargetStageBinding?: typeof resolveStandardAgentStageTargetBinding;
 };
 
 type RunInternalStandardAgentAction = (
@@ -233,9 +237,19 @@ export async function buildLiveActionContext(input: {
     ],
   });
   if (action.execution_binding.kind === 'stage_binding') {
-    (input.dependencies.compileStageManifest ?? compileStandardAgentStageManifest)(
-      input.runtimeBinding.checkout_root,
-    );
+    const targetStageId = action.stage_route?.entry_stage_ref;
+    if (!targetStageId) {
+      fail('Stage-bound action is missing its target Stage route.', { action_id: action.action_id });
+    }
+    if (input.dependencies.resolveTargetStageBinding) {
+      input.dependencies.resolveTargetStageBinding(input.runtimeBinding.checkout_root, targetStageId);
+    } else if (input.dependencies.compileStageManifest) {
+      // Keep injected legacy test/provisioning adapters deterministic. The
+      // production path uses target-stage binding below.
+      input.dependencies.compileStageManifest(input.runtimeBinding.checkout_root);
+    } else {
+      resolveStandardAgentStageTargetBinding(input.runtimeBinding.checkout_root, targetStageId);
+    }
   }
   const foundryRequest = action.execution_binding.kind === 'foundry_binding'
     ? validateDesignRequest(payload)

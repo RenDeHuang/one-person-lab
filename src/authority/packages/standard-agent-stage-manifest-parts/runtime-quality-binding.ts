@@ -179,6 +179,15 @@ function compileTargetStageBinding(repoDir: string, stageId: string) {
   };
 }
 
+export function resolveStandardAgentStageTargetBinding(
+  repoDirInput: string,
+  stageIdInput: string,
+) {
+  const repoDir = path.resolve(repoDirInput);
+  const stageId = text(stageIdInput, 'stage_id', repoDir);
+  return compileTargetStageBinding(repoDir, stageId);
+}
+
 export function resolveStandardAgentStageQualityRuntimeBinding(
   repoDirInput: string,
   stageIdInput: string,

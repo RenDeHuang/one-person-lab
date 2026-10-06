@@ -1,1 +1,4 @@
-export { compileStandardAgentStageManifest } from '../standard-agent-stage-manifest.ts';
+export {
+  compileStandardAgentStageManifest,
+  resolveStandardAgentStageTargetBinding,
+} from '../standard-agent-stage-manifest.ts';

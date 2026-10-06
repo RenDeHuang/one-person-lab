@@ -43,12 +43,14 @@ export type {
 } from './domain-pack-compiler/repo-contract-descriptor.ts';
 export {
   compileStandardAgentStageManifest,
+  resolveStandardAgentStageTargetBinding,
   resolveStandardAgentStageReviewLane,
   resolveStandardAgentStageQualityRuntimeBinding,
   stageAttemptExecutorPolicyWithReviewLane,
 } from './standard-agent-stage-manifest.ts';
 export type {
   StandardAgentStageQualityRuntimeBinding,
+  StandardAgentStageTargetBinding,
 } from './standard-agent-stage-manifest.ts';
 export {
   readStandardAgentStagePromptFile,
