@@ -18,7 +18,7 @@
       "settings_projection",
       "app_settings_read_model",
       "connection_registry",
-      "app_aion_consumer_only_readback",
+      "app_studio_consumer_only_readback",
       "control_center_groups",
       "action_sections",
       "issue_queue",
@@ -56,7 +56,7 @@
     },
     "shell_policy": {
       "app_consumes_read_model_only": true,
-      "aion_shell_is_renderer_only": true,
+      "studio_shell_is_renderer_only": true,
       "layout_source": "one-person-lab-app/contracts/app-product-profile.json#settings_control_center",
       "broad_app_state_layout_inference_allowed": false,
       "shell_must_not_infer_domain_truth": true,
@@ -177,7 +177,7 @@
   },
   "app_settings_read_model": {
     "surface_kind": "opl_app_settings_read_model.v1",
-    "purpose": "Typed App/Aion-consumable Settings model derived from OPL app state so shell adapters do not reconstruct policy.",
+    "purpose": "Typed App/Studio-consumable Settings model derived from OPL app state so shell adapters do not reconstruct policy.",
     "required_fields": [
       "page_structure",
       "codex_model_policy",
@@ -239,7 +239,7 @@
     },
     "settings_projection": {
       "surface_kind": "opl_settings_projection.v1",
-      "purpose": "Settings-specific projection sections for App/Aion rendering so the UI does not infer Settings IA from broad app_state.",
+      "purpose": "Settings-specific projection sections for App/Studio rendering so the UI does not infer Settings IA from broad app_state.",
       "ordinary_sections": [
         "overview",
         "gateway",
@@ -307,7 +307,7 @@
       "doctor_read_model_ref": "docker_webui_doctor",
       "policy": {
         "app_and_opl_are_policy_action_source": true,
-        "aion_shell_is_adapter_view_model_consumer_only": true,
+        "studio_shell_is_adapter_view_model_consumer_only": true,
         "shell_must_not_copy_webui_policy": true,
         "ordinary_settings_read_must_not_probe_docker": true,
         "secret_payload_policy": "stdin_only_never_json_or_logs",
@@ -358,7 +358,7 @@
     },
     "shell_policy": {
       "app_consumes_read_model_only": true,
-      "aion_shell_is_renderer_only": true,
+      "studio_shell_is_renderer_only": true,
       "shell_must_not_rewrite_model_or_reasoning_policy": true,
       "shell_must_not_infer_api_key_or_workspace_service_truth": true,
       "shell_must_not_execute_unlisted_actions": true
@@ -551,20 +551,20 @@
     "docker_webui": "delegates_to_existing_install_configure_startup_maintenance_doctor_routes_without_secret_payloads_or_release_runtime_ready_claims"
   },
   "consumer_only_enforcement": {
-    "surface_kind": "opl_app_aion_consumer_only_boundary.v1",
-    "readback_surface": "app_state.settings_control_center.app_aion_consumer_only_readback",
+    "surface_kind": "opl_app_studio_consumer_only_boundary.v1",
+    "readback_surface": "app_state.settings_control_center.app_studio_consumer_only_readback",
     "app_settings_read_model_ref": "app_state.settings_control_center.app_settings_read_model.consumer_only_readback",
     "source_phase": "reuse_first_platform_risk_audit_phase_8",
     "applies_to": [
       "one-person-lab-app",
-      "opl-aion-shell"
+      "opl-studio"
     ],
-    "purpose": "Keep App and Aion as GUI/product consumers of App-owned contracts and OPL read/action surfaces, not truth owners for runtime, update, settings, or domain private-platform state.",
+    "purpose": "Keep App and Studio as GUI/product consumers of App-owned contracts and OPL read/action surfaces, not truth owners for runtime, update, settings, or domain private-platform state.",
     "truth_owner_matrix": [
       {
         "surface": "settings_policy",
         "truth_owner": "one-person-lab framework settings_control_center contract plus one-person-lab-app product contract",
-        "app_aion_role": "render read model and route listed actions",
+        "app_studio_role": "render read model and route listed actions",
         "local_truth_allowed": false,
         "required_visible_refs": [
           "source_ref",
@@ -574,7 +574,7 @@
       {
         "surface": "app_release_and_installer",
         "truth_owner": "one-person-lab-app release owner",
-        "app_aion_role": "display release owner status, blocker, or receipt ref",
+        "app_studio_role": "display release owner status, blocker, or receipt ref",
         "local_truth_allowed": false,
         "required_visible_refs": [
           "app_owner_receipt_ref_or_typed_blocker_ref",
@@ -585,7 +585,7 @@
       {
         "surface": "runtime_provider_and_stage_status",
         "truth_owner": "one-person-lab Runway, StageRun, Temporal provider, and current_owner_delta read model",
-        "app_aion_role": "consume opl app state fast/full or explicit operator drilldown",
+        "app_studio_role": "consume opl app state fast/full or explicit operator drilldown",
         "local_truth_allowed": false,
         "required_visible_refs": [
           "current_owner_delta_ref",
@@ -596,7 +596,7 @@
       {
         "surface": "managed_module_and_capability_packages",
         "truth_owner": "one-person-lab Packages fresh status and presence projection",
-        "app_aion_role": "show functional package readiness and package action refs while source carriers remain provenance",
+        "app_studio_role": "show functional package readiness and package action refs while source carriers remain provenance",
         "local_truth_allowed": false,
         "required_visible_refs": [
           "package_descriptor_ref",
@@ -607,7 +607,7 @@
       {
         "surface": "domain_private_platform_residue",
         "truth_owner": "domain-private-platform-tail-matrix cleanup lane plus domain owner decision",
-        "app_aion_role": "developer/operator detail only; never default Settings or first-screen truth",
+        "app_studio_role": "developer/operator detail only; never default Settings or first-screen truth",
         "local_truth_allowed": false,
         "required_visible_refs": [
           "cleanup_lane_ref",
@@ -616,7 +616,7 @@
       }
     ],
     "local_scheduler_policy": {
-      "aion_local_scheduler_allowed_roles": [
+      "studio_local_scheduler_allowed_roles": [
         "refresh_trigger",
         "ui_maintenance",
         "poll_existing_read_model"
@@ -637,8 +637,8 @@
       ]
     },
     "forbidden_truth_only_paths": [
-      "aion_shell_settings_store_as_policy_truth",
-      "aion_local_scheduler_as_update_truth",
+      "studio_shell_settings_store_as_policy_truth",
+      "studio_local_scheduler_as_update_truth",
       "app_local_read_model_as_runtime_truth_without_opl_source_ref",
       "shell_docker_probe_as_runtime_ready_claim",
       "gui_release_status_without_app_owner_receipt_or_typed_blocker",
@@ -657,15 +657,15 @@
     ],
     "validator_finding_policy": "missing_required_visible_boundary_fields_must_surface_as_validator_findings_before_settings_can_imply_truth",
     "authority_boundary": {
-      "app_aion_can_write_policy_truth": false,
-      "app_aion_can_write_runtime_truth": false,
-      "app_aion_can_write_release_truth": false,
-      "app_aion_can_write_domain_truth": false,
-      "app_aion_can_create_owner_receipt": false,
-      "app_aion_can_create_typed_blocker": false,
-      "app_aion_can_authorize_private_platform_cleanup": false,
-      "app_aion_can_claim_app_release_ready": false,
-      "app_aion_can_claim_production_ready": false
+      "app_studio_can_write_policy_truth": false,
+      "app_studio_can_write_runtime_truth": false,
+      "app_studio_can_write_release_truth": false,
+      "app_studio_can_write_domain_truth": false,
+      "app_studio_can_create_owner_receipt": false,
+      "app_studio_can_create_typed_blocker": false,
+      "app_studio_can_authorize_private_platform_cleanup": false,
+      "app_studio_can_claim_app_release_ready": false,
+      "app_studio_can_claim_production_ready": false
     }
   },
   "authority_boundary": {
@@ -693,6 +693,6 @@
     "does_not_create_storage_claim_graph_or_orphan_gc_engine",
     "does_not_execute_webui_storage_mutation_or_generic_docker_prune",
     "does_not_define_app_release_truth",
-    "does_not_make_aion_shell_a_truth_owner"
+    "does_not_make_studio_shell_a_truth_owner"
   ]
 }

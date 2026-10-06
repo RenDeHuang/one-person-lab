@@ -146,9 +146,7 @@ test('WebUI inventory excludes Projects and exposes only carrier-host destructiv
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-webui-storage-'));
   const dataDir = path.join(root, 'data');
   const previousOplDataDir = process.env.OPL_DATA_DIR;
-  const previousAionDataDir = process.env.AIONUI_DATA_DIR;
   delete process.env.OPL_DATA_DIR;
-  delete process.env.AIONUI_DATA_DIR;
   try {
     fs.mkdirSync(path.join(dataDir, 'projects'), { recursive: true });
     fs.mkdirSync(path.join(dataDir, 'logs'), { recursive: true });
@@ -178,7 +176,6 @@ test('WebUI inventory excludes Projects and exposes only carrier-host destructiv
     assert.equal(namedVolume.reason_code, 'named_volume_not_directly_observable');
   } finally {
     restoreEnv('OPL_DATA_DIR', previousOplDataDir);
-    restoreEnv('AIONUI_DATA_DIR', previousAionDataDir);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

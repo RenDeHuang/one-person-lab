@@ -244,7 +244,7 @@ export function configuredCodexHome(env: NodeJS.ProcessEnv) {
 /** Internal Packages use the native carrier without registering in the user's Codex App. */
 export function internalPackageCodexHome(env: NodeJS.ProcessEnv) {
   const home = env.HOME?.trim() || os.homedir();
-  const dataDir = env.OPL_DATA_DIR?.trim() || env.AIONUI_DATA_DIR?.trim();
+  const dataDir = env.OPL_DATA_DIR?.trim();
   const stateDir = env.OPL_STATE_DIR?.trim()
     ? path.resolve(env.OPL_STATE_DIR)
     : dataDir

@@ -190,7 +190,6 @@ export function buildAgentPackageStoreStorageInventory(input: {
 function configuredWebuiDataDir(explicit?: string | null) {
   const value = explicit?.trim()
     || process.env.OPL_DATA_DIR?.trim()
-    || process.env.AIONUI_DATA_DIR?.trim()
     || null;
   if (!value) return { data_dir: null, reason_code: 'webui_data_root_not_configured' } as const;
   if (!path.isAbsolute(value)) {

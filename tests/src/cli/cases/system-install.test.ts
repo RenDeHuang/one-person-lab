@@ -761,7 +761,7 @@ test('system initialize accepts App-managed runtime Codex when PATH has no Codex
   }
 });
 
-test('install command points WebUI users to the AionUI shell instead of a local Product API service', () => {
+test('install command points WebUI users to the OPL Studio shell instead of a local Product API service', () => {
   const homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-install-webui-note-home-'));
 
   try {

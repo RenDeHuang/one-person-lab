@@ -300,7 +300,6 @@ export function buildOplDockerWebuiDoctor() {
     manifestComponents,
     port,
     browserUrl,
-    aionuiDataDir,
     oplDataDir,
   } = startupReadback;
   const status: DoctorStatus = startupReadback.startup_state.phase === 'not_configured'
@@ -329,13 +328,11 @@ export function buildOplDockerWebuiDoctor() {
         startup_phase: startupReadback.startup_state.phase,
       },
       environment: {
-        AIONUI_DATA_DIR: aionuiDataDir,
         OPL_DATA_DIR: oplDataDir,
         OPL_PROJECTS_DIR: normalizePath(optionalEnv('OPL_PROJECTS_DIR')),
         OPL_STATE_DIR: normalizePath(optionalEnv('OPL_STATE_DIR')),
-        AIONUI_PORT: optionalEnv('AIONUI_PORT'),
         PORT: optionalEnv('PORT'),
-        AIONUI_BROWSER_URL: optionalEnv('AIONUI_BROWSER_URL'),
+        OPL_BROWSER_URL: optionalEnv('OPL_BROWSER_URL'),
       },
       paths: {
         effective_data_dir: dataDir,
@@ -371,7 +368,7 @@ export function buildOplDockerWebuiDoctor() {
       browser: {
         url: browserUrl,
         url_status: browserUrl ? 'configured' : 'not_visible',
-        host: optionalEnv('AIONUI_HOST') ?? '127.0.0.1',
+        host: optionalEnv('OPL_HOST') ?? '127.0.0.1',
         port,
       },
       observations,
@@ -397,9 +394,8 @@ export function buildOplDockerWebuiDoctor() {
 }
 
 export function buildDockerWebuiStartupReadback() {
-  const aionuiDataDir = normalizePath(optionalEnv('AIONUI_DATA_DIR'));
   const oplDataDir = normalizePath(optionalEnv('OPL_DATA_DIR'));
-  const dataDir = oplDataDir ?? aionuiDataDir;
+  const dataDir = oplDataDir;
   const projectsDir = normalizePath(optionalEnv('OPL_PROJECTS_DIR'))
     ?? (dataDir ? path.join(dataDir, 'projects') : null);
   const statePaths = resolveOplStatePaths({ dataDir });
@@ -413,9 +409,9 @@ export function buildDockerWebuiStartupReadback() {
     : hasUsableManifest(installManifest)
       ? 'found'
       : 'invalid';
-  const port = optionalEnv('AIONUI_PORT') ?? optionalEnv('PORT');
-  const host = optionalEnv('AIONUI_HOST') ?? '127.0.0.1';
-  const browserUrl = optionalEnv('AIONUI_BROWSER_URL')
+  const port = optionalEnv('OPL_PORT') ?? optionalEnv('PORT');
+  const host = optionalEnv('OPL_HOST') ?? '127.0.0.1';
+  const browserUrl = optionalEnv('OPL_BROWSER_URL')
     ?? (port ? `http://${host}:${port}/` : null);
   const apiKey = readApiKeyStatus();
   const seedStatus = readString(installManifest, 'status');
@@ -430,12 +426,11 @@ export function buildDockerWebuiStartupReadback() {
     port,
   });
   const webuiEnvVisible = Boolean(
-    aionuiDataDir
-    || oplDataDir
+    oplDataDir
     || optionalEnv('OPL_PROJECTS_DIR')
-    || optionalEnv('AIONUI_PORT')
+    || optionalEnv('OPL_PORT')
     || optionalEnv('PORT')
-    || optionalEnv('AIONUI_BROWSER_URL'),
+    || optionalEnv('OPL_BROWSER_URL'),
   );
 
   const observations = [
@@ -447,7 +442,6 @@ export function buildDockerWebuiStartupReadback() {
         : 'No Docker/WebUI data directory env was visible.',
       {
         env: {
-          AIONUI_DATA_DIR: aionuiDataDir,
           OPL_DATA_DIR: oplDataDir,
         },
         effective_path: dataDir,
@@ -516,9 +510,9 @@ export function buildDockerWebuiStartupReadback() {
         : 'No WebUI port or browser URL env was visible.',
       {
         env: {
-          AIONUI_BROWSER_URL: optionalEnv('AIONUI_BROWSER_URL'),
-          AIONUI_HOST: optionalEnv('AIONUI_HOST'),
-          AIONUI_PORT: optionalEnv('AIONUI_PORT'),
+          OPL_BROWSER_URL: optionalEnv('OPL_BROWSER_URL'),
+          OPL_HOST: optionalEnv('OPL_HOST'),
+          OPL_PORT: optionalEnv('OPL_PORT'),
           PORT: optionalEnv('PORT'),
         },
         browser_url: browserUrl,
@@ -591,7 +585,6 @@ export function buildDockerWebuiStartupReadback() {
   ];
 
   return {
-    aionuiDataDir,
     oplDataDir,
     dataDir,
     projectsDir,

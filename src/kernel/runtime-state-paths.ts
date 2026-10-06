@@ -102,7 +102,7 @@ function assertExplicitTestStateDir(explicitStateDir: string | null, stateDir: s
 }
 
 function normalizeDockerDataDir() {
-  return process.env.OPL_DATA_DIR?.trim() || process.env.AIONUI_DATA_DIR?.trim() || null;
+  return process.env.OPL_DATA_DIR?.trim() || null;
 }
 
 export function resolveOplStatePaths(input: { dataDir?: string | null } = {}): OplStatePaths {

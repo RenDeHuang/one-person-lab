@@ -17,7 +17,6 @@ function childTestEnv(homeRoot: string, overrides: NodeJS.ProcessEnv = {}) {
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeRoot };
   delete env.OPL_STATE_DIR;
   delete env.OPL_DATA_DIR;
-  delete env.AIONUI_DATA_DIR;
   delete env.OPL_REPO_TEMP_ENV_ACTIVE;
   delete env.OPL_REPO_TEMP_ROOT;
   delete env.NODE_TEST_CONTEXT;

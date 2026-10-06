@@ -402,7 +402,7 @@ test('app action execute dry-runs Codex, module, scheduler, and worker actions f
       '--action',
       'settings_inventory_webui_data_volume',
       '--dry-run',
-    ], { ...env, OPL_DATA_DIR: '', AIONUI_DATA_DIR: '' }).app_action_execution;
+    ], { ...env, OPL_DATA_DIR: '' }).app_action_execution;
 
     assert.equal(
       webuiStorageInventory.delegated_surface,
@@ -519,7 +519,7 @@ test('app action execute dry-runs Codex, module, scheduler, and worker actions f
       '--dry-run',
     ], {
       ...env,
-      AIONUI_PORT: '3000',
+      OPL_PORT: '3000',
     }).app_action_execution;
 
     assert.equal(webuiOpen.delegated_surface, 'opl system docker-webui doctor --json#docker_webui_doctor.browser.url');

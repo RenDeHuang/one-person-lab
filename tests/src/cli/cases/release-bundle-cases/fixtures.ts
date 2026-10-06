@@ -156,7 +156,7 @@ function fixtureRequest(
     },
     sources: {
       app: { repo: 'one-person-lab-app', source_commit: sourceSha },
-      shell: { repo: 'opl-aion-shell', source_commit: '2'.repeat(40) },
+      shell: { repo: 'opl-studio', source_commit: '2'.repeat(40) },
       framework: { repo: 'one-person-lab', source_commit: '3'.repeat(40) },
     },
     identity_mode: 'app_standard_compatibility' as const,
@@ -219,7 +219,7 @@ function unifiedStableRequest(sourceRoot: string, additionalPackageIds: readonly
       },
       {
         id: 'dockerfile' as const,
-        ref: 'shells/aionui/Dockerfile',
+        ref: 'shells/opl-studio/Dockerfile',
         digest: digest('webui-dockerfile'),
         size_bytes: 104,
       },

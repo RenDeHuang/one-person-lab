@@ -1,6 +1,6 @@
 import { assert, runCli, test } from './shared.ts';
 
-test('help keeps GUI lane on AionUI without Product API service commands', () => {
+test('help keeps GUI lane on OPL Studio without Product API service commands', () => {
   const output = runCli(['help']);
   assert.equal(output.help.commands.some((entry: { command: string }) => entry.command === 'web'), false);
   assert.equal(

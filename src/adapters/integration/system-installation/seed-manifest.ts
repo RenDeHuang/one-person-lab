@@ -251,8 +251,6 @@ function pathExists(directory: string | null) {
 function resolveDataDir(explicit?: string | null) {
   const explicitDataDir = explicit?.trim() || optionalEnv('OPL_DATA_DIR');
   if (explicitDataDir) return path.resolve(explicitDataDir);
-  const aionDataDir = optionalEnv('AIONUI_DATA_DIR');
-  if (aionDataDir) return path.resolve(aionDataDir);
   return null;
 }
 
@@ -595,7 +593,7 @@ export async function applyOplSeedManifest(options: OplSeedApplyOptions = {}): P
       reason: dataDir ? 'data_dir_available' : 'data_dir_not_configured',
       component_kind: previousManifestStatus === 'missing' ? 'image_seed' : 'migration',
       source: dataDir ? 'docker_webui_data_volume' : null,
-      source_ref: dataDir ? 'OPL_DATA_DIR|AIONUI_DATA_DIR' : null,
+      source_ref: dataDir ? 'OPL_DATA_DIR' : null,
       path: dataDir,
       version: null,
       digest: null,

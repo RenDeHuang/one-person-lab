@@ -172,7 +172,7 @@ export async function buildOplEnvironment(
       },
       native_helpers: nativeHelpers,
       gui_shell: {
-        strategy: 'aionui_remote_webui',
+        strategy: 'opl_studio_remote_webui',
         service_dependency: 'none',
         local_product_api_retired: true,
       },
@@ -235,7 +235,7 @@ export async function buildOplEnvironment(
         'Codex CLI readiness and Codex API configuration are reported separately so first-run can guide missing API keys without copying secrets into logs.',
         'Full OPL readiness uses the configured family runtime provider; non-default executors are explicit stage/request selections with independent receipts.',
         'OPL reports native helper lifecycle readiness here; opl install can run the native repair path when helper binaries are missing.',
-        'AionUI provides the GUI/WebUI shell; OPL no longer hosts a local Product API service on port 8787.',
+        'OPL Studio provides the GUI/WebUI shell; OPL no longer hosts a local Product API service on port 8787.',
         'Domain modules are tracked separately so the GUI can manage install and upgrade actions from one settings area.',
         'Developer Mode is exposed as a settings surface backed by the existing developer_supervisor system action and includes GitHub identity, repository authority, and supervised repair route projections.',
         'Docker/WebUI seed state is reported from the install manifest when startup maintenance or seed-apply has recorded it; this read model does not claim runtime readiness.',

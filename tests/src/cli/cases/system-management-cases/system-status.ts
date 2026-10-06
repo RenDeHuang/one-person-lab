@@ -154,7 +154,7 @@ exit 1
     assert.equal(output.system.native_helpers.runtime.discovery.repair_command, 'npm run native:repair');
     assert.equal(['ready', 'attention_needed'].includes(output.system.native_helpers.health_status), true);
     assert.equal(Array.isArray(output.system.native_helpers.issues), true);
-    assert.equal(output.system.gui_shell.strategy, 'aionui_remote_webui');
+    assert.equal(output.system.gui_shell.strategy, 'opl_studio_remote_webui');
     assert.equal(output.system.gui_shell.service_dependency, 'none');
     assert.equal(output.system.gui_shell.local_product_api_retired, true);
     assertBlockedDeveloperModeSurface(output.system.developer_mode);

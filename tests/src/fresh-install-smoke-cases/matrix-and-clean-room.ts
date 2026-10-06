@@ -100,7 +100,7 @@ export function registerMatrixAndCleanRoomTests({
     assert.equal(matrix.gui_accessibility_labels.retry_button, 'opl-first-run-retry-button');
     assert.equal(matrix.gui_accessibility_labels.guid_entry, 'opl-guid-entry');
     assert.equal(matrix.gui_vm_implementation.repo, 'gaofeng21cn/one-person-lab-app');
-    assert.equal(matrix.gui_vm_implementation.shell_root, 'shells/aionui');
+    assert.equal(matrix.gui_vm_implementation.shell_root, 'shells/opl-studio');
     assert.match(matrix.gui_vm_implementation.packaged_guest_smoke_command, /test:opl-first-run-vm/);
     assert.match(matrix.gui_vm_implementation.tart_host_smoke_command, /test:opl-first-run-vm:tart/);
     assert.equal(matrix.gui_vm_implementation.nightly_workflow, '.github/workflows/opl-first-run-vm.yml');

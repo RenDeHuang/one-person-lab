@@ -136,7 +136,7 @@
     "gui_product_contract_owner": "one-person-lab-app",
     "app_release_owner": "one-person-lab-app",
     "shell_role": "implementation_adapter_only",
-    "active_shell_implementation_carrier": "opl-aion-shell",
+    "active_shell_implementation_carrier": "opl-studio",
     "ordinary_app_product_shape": "codex_app_wrapper",
     "ordinary_app_fixed_executor": "codex_cli",
     "ordinary_app_builtin_foundry_entry_projection": {

@@ -290,7 +290,7 @@ test('status dashboard aggregates current OPL management surfaces into one view'
     assert.equal(output.dashboard.gui_runtime.direct_entry_command, 'opl');
     assert.equal(Object.hasOwn(output.dashboard.gui_runtime, 'local_web_status'), false);
     assert.equal(Object.hasOwn(output.dashboard.gui_runtime, 'local_web_command'), false);
-    assert.equal(output.dashboard.gui_runtime.desktop_shell_status, 'aionui_shell');
+    assert.equal(output.dashboard.gui_runtime.desktop_shell_status, 'opl_studio_shell');
     assert.equal(output.dashboard.gui_runtime.desktop_default_entry_status, 'release_or_installed_app');
     assert.equal(output.dashboard.gui_runtime.recommended_entry_surfaces_count, 0);
     assert.deepEqual(output.dashboard.gui_runtime.recommended_entry_surfaces, []);

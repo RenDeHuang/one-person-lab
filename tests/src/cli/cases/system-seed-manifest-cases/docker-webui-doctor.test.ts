@@ -113,10 +113,10 @@ test('system docker-webui doctor reports missing seed boundary without repairs',
   try {
     const output = runCli(['system', 'docker-webui', 'doctor'], {
       HOME: homeRoot,
-      AIONUI_DATA_DIR: dataDir,
+      OPL_DATA_DIR: dataDir,
       OPL_PROJECTS_DIR: projectsDir,
       OPL_STATE_DIR: stateDir,
-      AIONUI_PORT: '3000',
+      OPL_PORT: '3000',
       PATH: process.env.PATH ?? '',
     }) as {
       docker_webui_doctor: {
@@ -247,9 +247,9 @@ test('system docker-webui doctor reads persisted seed manifest and browser URL',
     const output = runCli(['system', 'docker-webui', 'doctor'], {
       HOME: homeRoot,
       CODEX_HOME: codexHome,
-      AIONUI_DATA_DIR: dataDir,
+      OPL_DATA_DIR: dataDir,
       OPL_STATE_DIR: stateDir,
-      AIONUI_BROWSER_URL: 'http://localhost:3000/',
+      OPL_BROWSER_URL: 'http://localhost:3000/',
       PATH: process.env.PATH ?? '',
     }) as {
       docker_webui_doctor: {
@@ -377,9 +377,9 @@ test('system docker-webui doctor reports Docker container, image, mount, and por
     const output = runCli(['system', 'docker-webui', 'doctor'], {
       HOME: homeRoot,
       CODEX_HOME: codexHome,
-      AIONUI_DATA_DIR: dataDir,
+      OPL_DATA_DIR: dataDir,
       OPL_PROJECTS_DIR: projectsDir,
-      AIONUI_PORT: '3000',
+      OPL_PORT: '3000',
       OPL_WEBUI_IMAGE: 'ghcr.io/gaofeng21cn/one-person-lab-webui:latest',
       TEST_OPL_DATA_DIR: dataDir,
       TEST_OPL_PROJECTS_DIR: projectsDir,
@@ -473,10 +473,10 @@ test('system docker-webui doctor reports initializing and repairable startup pha
     const initializing = runCli(['system', 'docker-webui', 'doctor'], {
       HOME: initializingHome,
       CODEX_HOME: initializingCodex,
-      AIONUI_DATA_DIR: initializingData,
+      OPL_DATA_DIR: initializingData,
       OPL_PROJECTS_DIR: initializingProjects,
       OPL_STATE_DIR: initializingState,
-      AIONUI_PORT: '3000',
+      OPL_PORT: '3000',
       PATH: process.env.PATH ?? '',
     }) as {
       docker_webui_doctor: {
@@ -518,10 +518,10 @@ test('system docker-webui doctor reports initializing and repairable startup pha
     const repairable = runCli(['system', 'docker-webui', 'doctor'], {
       HOME: repairHome,
       CODEX_HOME: repairCodex,
-      AIONUI_DATA_DIR: repairData,
+      OPL_DATA_DIR: repairData,
       OPL_PROJECTS_DIR: repairProjects,
       OPL_STATE_DIR: repairState,
-      AIONUI_PORT: '3000',
+      OPL_PORT: '3000',
       PATH: process.env.PATH ?? '',
     }) as typeof initializing;
     assert.equal(repairable.docker_webui_doctor.startup_state.phase, 'repairable_failure');

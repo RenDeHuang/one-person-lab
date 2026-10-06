@@ -6,7 +6,7 @@
   "runtime_truth_boundary": {
     "source_of_truth": "OPL Framework install/update/receipt runtime truth",
     "not_second_runtime_truth": true,
-    "webui_shell_owner": "one-person-lab-app / opl-aion-shell",
+    "webui_shell_owner": "one-person-lab-app / opl-studio",
     "canonical_image_manifest_path": "/opt/opl/image-manifest.json",
     "canonical_seed_metadata_path": "/opt/opl/seed/metadata.json",
     "state_file": "${OPL_STATE_DIR:-<data-dir>/opl/state}/install-manifest.json",

@@ -85,7 +85,7 @@ export function buildOplGuiFirstRunAutomationContract() {
     ],
     vm_implementation: {
       repo: 'gaofeng21cn/one-person-lab-app',
-      shell_root: 'shells/aionui',
+      shell_root: 'shells/opl-studio',
       packaged_guest_smoke_command: 'bun run test:opl-first-run-vm -- --dmg <release.dmg> --assert-clean',
       tart_host_smoke_command:
         'bun run test:opl-first-run-vm:tart -- --source-vm <clean-tart-vm> --dmg <release.dmg>',
@@ -101,7 +101,7 @@ export function buildOplGuiFirstRunAutomationContract() {
     },
     owner_split: {
       opl_cli: 'installs dependencies, reports machine-readable state, and writes first-run JSONL events',
-      one_person_lab_app: 'renders first-run state from shells/aionui, exposes stable accessibility labels, and shows blockers',
+      one_person_lab_app: 'renders first-run state from shells/opl-studio, exposes stable accessibility labels, and shows blockers',
     },
   };
 }
@@ -186,7 +186,7 @@ export function buildOplFreshInstallTestMatrix() {
         scenario_id: 'clean_vm_release_first_launch',
         layer: 'macos_vm_gui',
         setup:
-          'clean macOS VM snapshot through gaofeng21cn/one-person-lab-app shells/aionui .github/workflows/opl-first-run-vm.yml, downloaded One Person Lab release DMG, no existing OPL state',
+          'clean macOS VM snapshot through gaofeng21cn/one-person-lab-app shells/opl-studio .github/workflows/opl-first-run-vm.yml, downloaded One Person Lab release DMG, no existing OPL state',
         expected_artifacts: [
           'first-run JSONL log',
           'system initialize JSON',

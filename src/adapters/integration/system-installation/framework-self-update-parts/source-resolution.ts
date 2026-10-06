@@ -129,8 +129,7 @@ export function resolveFrameworkUpdateTargetRoot(defaultTargetRoot: string) {
   if (explicitTargetRoot) {
     return path.resolve(explicitTargetRoot);
   }
-  const dockerDataDir = normalizeOptionalString(process.env.OPL_DATA_DIR)
-    ?? normalizeOptionalString(process.env.AIONUI_DATA_DIR);
+  const dockerDataDir = normalizeOptionalString(process.env.OPL_DATA_DIR);
   if (dockerDataDir) {
     return path.join(path.resolve(dockerDataDir), 'opl', 'framework');
   }

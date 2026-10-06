@@ -43,13 +43,13 @@ export function buildOplShellMcpWiring() {
   };
 }
 
-export function buildOplAionRuntimeConsumptionContract() {
+export function buildOplStudioRuntimeConsumptionContract() {
   const summaryCommand = ['runtime', 'app-operator-drilldown', '--json'];
   const fullDetailCommand = ['runtime', 'app-operator-drilldown', '--detail', 'full', '--json'];
 
   return {
-    surface_kind: 'opl_aion_runtime_consumption_contract',
-    shell_adapter: 'aionui',
+    surface_kind: 'opl_studio_runtime_consumption_contract',
+    shell_adapter: 'opl-studio',
     consumer: 'one_person_lab_app_runtime_page',
     default_read_model_command: ['app', 'state', '--profile', 'fast'],
     default_detail_level: 'summary',
@@ -73,7 +73,7 @@ export function buildOplAionRuntimeConsumptionContract() {
     },
     authority_boundary: {
       opl: 'read_model_and_safe_action_shell_owner',
-      aionui: 'consumer_shell_only',
+      studio: 'consumer_shell_only',
       domain: 'truth_memory_artifact_quality_export_owner',
       can_write_domain_truth: false,
       can_read_memory_body: false,

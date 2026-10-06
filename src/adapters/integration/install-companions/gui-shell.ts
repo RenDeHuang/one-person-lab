@@ -5,13 +5,13 @@ import { resolveDefaultFamilyWorkspaceRoot } from '../../../authority/workspace/
 import { buildOplGuiArtifactName, buildOplReleaseTag, getOplReleaseRepo, getOplReleaseVersion } from '../opl-release.ts';
 
 export type OplGuiShellSurface = {
-  shell_id: 'opl_aion_shell';
+  shell_id: 'opl_studio_shell';
   label: 'OPL Desktop GUI';
   owner: 'one-person-lab-app';
-  base_shell: 'aionui';
-  relation_to_opl: 'opl_branded_gui_shell';
+  base_shell: 'opl-studio';
+  relation_to_opl: 'opl_first_party_application_host';
   repo_url: string;
-  active_shell_root: 'shells/aionui';
+  active_shell_root: 'shells/opl-studio';
   release_repo: string;
   release_tag: string;
   opl_release_version: string;
@@ -40,13 +40,13 @@ export function buildOplGuiShellSurface(repoRoot: string): OplGuiShellSurface {
   const releaseVersion = getOplReleaseVersion();
 
   return {
-    shell_id: 'opl_aion_shell',
+    shell_id: 'opl_studio_shell',
     label: 'OPL Desktop GUI',
     owner: 'one-person-lab-app',
-    base_shell: 'aionui',
-    relation_to_opl: 'opl_branded_gui_shell',
-    repo_url: 'https://github.com/gaofeng21cn/one-person-lab-app',
-    active_shell_root: 'shells/aionui',
+    base_shell: 'opl-studio',
+    relation_to_opl: 'opl_first_party_application_host',
+    repo_url: 'https://github.com/gaofeng21cn/opl-studio',
+    active_shell_root: 'shells/opl-studio',
     release_repo: getOplReleaseRepo(),
     release_tag: buildOplReleaseTag(releaseVersion),
     opl_release_version: releaseVersion,
@@ -56,7 +56,7 @@ export function buildOplGuiShellSurface(repoRoot: string): OplGuiShellSurface {
       app_name: 'OPL',
       bundle_name: 'OPL.app',
       required_branding: ['One Person Lab', 'OPL iconography', 'OPL product wording'],
-      hidden_upstream_modules: ['AionUI team management', 'AionUI scheduled tasks', 'generic upstream branding'],
+      hidden_upstream_modules: ['legacy team management', 'legacy scheduled tasks', 'generic upstream branding'],
     },
     release_strategy: 'prefer_prebuilt_release_then_source_build',
     prebuilt_artifacts: [
@@ -95,9 +95,9 @@ export function buildOplGuiShellSurface(repoRoot: string): OplGuiShellSurface {
       'bun run dist:linux',
     ],
     notes: [
-      'OPL owns the runtime contract and App release discovery surface; one-person-lab-app owns the OPL-branded desktop GUI package built from shells/aionui.',
-      'A valid OPL GUI package is an OPL-branded Electron-builder distributable uploaded to the one-person-lab-app GitHub Release.',
-      'The upstream AionUI app is not itself the OPL GUI.',
+      'OPL Framework owns the runtime contract; one-person-lab-app owns product packaging and release discovery while opl-studio owns the first-party Desktop, WebUI, and Docker application host.',
+      'A valid OPL GUI package is an OPL Studio Electron-builder distributable admitted and published through the App release contract.',
+      'Legacy shell implementations are not runtime, install, or release fallbacks.',
       'Source build is only the fallback when no release asset matches the local platform and architecture.',
     ],
   };

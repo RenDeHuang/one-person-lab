@@ -722,7 +722,7 @@ export async function buildOplInitialize(
         'Workspace root and update channel are stored in OPL-managed state files.',
         'Developer Mode settings are exposed through the same developer_supervisor system action used by CLI/system settings; GitHub identity, repository authority, and supervised repair routing are projected on the developer_mode surface.',
         'A configured family runtime provider is required for Full OPL readiness. Local CLI/status surfaces can still report degraded diagnostics when the online provider is missing or disabled.',
-        'The OPL desktop GUI is an OPL-branded App maintained in one-person-lab-app, with the active AionUI adapter under shells/aionui; the upstream AionUI app is not itself the OPL GUI.',
+        'The OPL desktop GUI is the first-party OPL Studio application host maintained in gaofeng21cn/opl-studio and packaged by one-person-lab-app; the Framework consumes its public App/Studio contract.',
       ],
     },
   };
