@@ -241,14 +241,32 @@ export async function buildLiveActionContext(input: {
     if (!targetStageId) {
       fail('Stage-bound action is missing its target Stage route.', { action_id: action.action_id });
     }
+    let targetBinding: ReturnType<typeof resolveStandardAgentStageTargetBinding> | null = null;
     if (input.dependencies.resolveTargetStageBinding) {
-      input.dependencies.resolveTargetStageBinding(input.runtimeBinding.checkout_root, targetStageId);
+      targetBinding = input.dependencies.resolveTargetStageBinding(
+        input.runtimeBinding.checkout_root,
+        targetStageId,
+      );
     } else if (input.dependencies.compileStageManifest) {
       // Keep injected legacy test/provisioning adapters deterministic. The
       // production path uses target-stage binding below.
       input.dependencies.compileStageManifest(input.runtimeBinding.checkout_root);
     } else {
-      resolveStandardAgentStageTargetBinding(input.runtimeBinding.checkout_root, targetStageId);
+      targetBinding = resolveStandardAgentStageTargetBinding(
+        input.runtimeBinding.checkout_root,
+        targetStageId,
+      );
+    }
+    if (targetBinding) {
+      const allowedActionRefs = Array.isArray(targetBinding.stage.allowed_action_refs)
+        ? targetBinding.stage.allowed_action_refs.filter((value): value is string => typeof value === 'string')
+        : [];
+      if (!allowedActionRefs.includes(action.action_id)) {
+        fail('Stage-bound action is not allowed by its target Stage.', {
+          action_id: action.action_id,
+          stage_id: targetStageId,
+        });
+      }
     }
   }
   const foundryRequest = action.execution_binding.kind === 'foundry_binding'

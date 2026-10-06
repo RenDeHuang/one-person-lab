@@ -24,6 +24,38 @@ import {
 } from './stage-quality-validation.ts';
 import type { StandardAgentStageQualityRuntimeBinding } from './types.ts';
 
+const TARGET_STAGE_CONTRACT_EXTENSION_FORBIDDEN_FIELDS = new Set([
+  'requires',
+  'ensures',
+  'boundary_assumptions',
+  'properties',
+  'expected_receipt_refs',
+  'receipt_schema_refs',
+  'authority_function_refs',
+  'l4_entry_gate',
+  'l5_entry_gate',
+  'stage_completion_policy',
+  'user_stage_log_contract',
+  'progress_delta_policy',
+  'typed_blocker_lineage_policy',
+  'runtime_event_refs',
+]);
+
+function assertTargetStageAuthority(value: Record<string, unknown>, field: string, repoDir: string) {
+  const forbidden = Object.entries(value).filter(([key, entry]) => (
+    (key.startsWith('opl_can_') || key === 'provider_completion_is_domain_completion')
+      ? entry !== false
+      : (key === 'quality_verdict_owner' || key === 'artifact_authority_owner')
+        && optionalString(entry) === 'one-person-lab'
+  ));
+  if (forbidden.length > 0) {
+    fail(`${field} grants forbidden OPL or provider authority.`, {
+      repo_dir: repoDir,
+      forbidden_authority_fields: forbidden.map(([key]) => key),
+    });
+  }
+}
+
 /**
  * A Stage attempt only needs the identity and contracts of its target Stage.
  * Full-pack compilation remains the qualification/projection path. Keeping
@@ -95,6 +127,17 @@ function compileTargetStageBinding(repoDir: string, stageId: string) {
     ? {}
     : record(stage.stage_contract_extension, 'stage.stage_contract_extension', repoDir);
   const stageContract = { ...declaredStageContract, ...stageContractExtension };
+  assertTargetStageAuthority(declaredStageContract, 'stage.stage_contract', repoDir);
+  assertTargetStageAuthority(stageContractExtension, 'stage.stage_contract_extension', repoDir);
+  const forbiddenExtensionFields = Object.keys(stageContractExtension)
+    .filter((field) => TARGET_STAGE_CONTRACT_EXTENSION_FORBIDDEN_FIELDS.has(field));
+  if (forbiddenExtensionFields.length > 0) {
+    fail('Target Stage contract extension cannot override Framework-owned fields.', {
+      repo_dir: repoDir,
+      stage_id: stageId,
+      forbidden_fields: forbiddenExtensionFields,
+    });
+  }
   const stagePromptRef = repoRef(repoDir, stage.prompt_ref, 'stage.prompt_ref');
   readStandardAgentStagePromptFile(repoDir, stagePromptRef);
   const stagePolicyRef = repoFile(repoDir, stage.policy_ref, 'stage.policy_ref').ref;
