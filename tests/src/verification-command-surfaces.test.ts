@@ -243,7 +243,7 @@ test('repo-tracked verification command surfaces reference valid npm scripts and
   }
 });
 
-test('Settings Control Center contract keeps App and Aion consumer-only', () => {
+test('Settings Control Center contract keeps App and Studio consumer-only', () => {
   const settingsControlCenter = readJson<Record<string, any>>(
     'contracts/opl-framework/settings-control-center-action-read-model-contract.json',
   );
@@ -267,13 +267,13 @@ test('Settings Control Center contract keeps App and Aion consumer-only', () => 
   const consumerOnly = settingsControlCenter.consumer_only_enforcement;
   assert.equal(
     consumerOnly.readback_surface,
-    'app_state.settings_control_center.app_aion_consumer_only_readback',
+    'app_state.settings_control_center.app_studio_consumer_only_readback',
   );
   assert.equal(
     consumerOnly.truth_owner_matrix.every((row: { local_truth_allowed: boolean }) => row.local_truth_allowed === false),
     true,
   );
-  assert.deepEqual(consumerOnly.local_scheduler_policy.aion_local_scheduler_allowed_roles, [
+  assert.deepEqual(consumerOnly.local_scheduler_policy.studio_local_scheduler_allowed_roles, [
     'refresh_trigger',
     'ui_maintenance',
     'poll_existing_read_model',
