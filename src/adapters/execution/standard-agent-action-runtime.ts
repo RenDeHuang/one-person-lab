@@ -3,7 +3,10 @@ import crypto from 'node:crypto';
 import { canonicalJsonBytes, canonicalJsonText } from '../../kernel/canonical-json.ts';
 import { isRecord } from '../../kernel/contract-validation.ts';
 import { validateDesignRequest } from '../../authority/evolution/index.ts';
-import { compileStandardAgentStageManifest } from '../../authority/packages/public/standard-agent-action-runtime.ts';
+import {
+  compileStandardAgentStageManifest,
+  resolveStandardAgentStageTargetBinding,
+} from '../../authority/packages/public/standard-agent-action-runtime.ts';
 import {
   prepareStandardAgentActionRunRequest,
 } from '../../authority/workspace/public/standard-agent-action-runtime.ts';
@@ -66,6 +69,7 @@ type RuntimeDependencies = {
   applyDomainArtifactCas?: typeof applyDomainArtifactCasMaterialization;
   runStageRuntime?: typeof runFamilyRuntime;
   compileStageManifest?: typeof compileStandardAgentStageManifest;
+  resolveTargetStageBinding?: typeof resolveStandardAgentStageTargetBinding;
   recordLedger?: typeof actionLedger;
   startFoundryRun?: (input: {
     request: ReturnType<typeof validateDesignRequest>;

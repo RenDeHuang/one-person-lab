@@ -82,6 +82,21 @@ test('standard Agent stage manifest compiler keeps stable domain identity and ta
   assert.equal(generated.target_domain_id, 'target-alpha');
 });
 
+test('target Stage binding does not inherit an unrelated later Stage quality failure', () => {
+  const root = fixture('target-stage-local-binding');
+  writePrimaryOnlyDeliverPolicy(root);
+  const manifest = readManifest(root);
+  manifest.stages[0].prompt_ref = 'agent/prompts/deliver.md';
+  manifest.stages[0].stage_quality_cycle_policy_ref = 'contracts/stage_quality_cycle_policy.json#/stages/deliver';
+  manifest.stages[1].stage_quality_cycle_policy_ref = 'contracts/stage_quality_cycle_policy.json#/stages/missing-later-stage';
+  writeManifest(root, manifest);
+
+  assert.throws(() => compileStandardAgentStageManifest(root), FrameworkContractError);
+  const binding = resolveStandardAgentStageQualityRuntimeBinding(root, manifest.stages[0].stage_id);
+  assert.equal(binding?.compile_mode, 'target_stage_binding');
+  assert.equal(binding?.stage_id, manifest.stages[0].stage_id);
+});
+
 test('Python callable validation disables bytecode even when isolated mode ignores Python env', () => {
   const root = fixture('target-python-bytecode');
   const moduleRoot = path.join(root, 'runtime', 'authority_functions');
