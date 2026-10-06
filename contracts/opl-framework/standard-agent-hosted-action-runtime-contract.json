@@ -91,7 +91,42 @@
     "handler_output_schema_validation_before_success": true,
     "stage_output_schema_is_expected_domain_output_contract_not_launch_receipt_schema": true,
     "handler_refs_must_resolve_before_launch": true,
-    "stage_manifest_must_compile_before_launch": true
+    "stage_manifest_must_compile_before_launch": false,
+    "stage_target_binding_must_resolve_before_launch": true,
+    "stage_target_binding_compile": {
+      "owner": "one-person-lab",
+      "entrypoint": "resolveStandardAgentStageQualityRuntimeBinding",
+      "required_inputs": [
+        "domain_descriptor_identity",
+        "action_catalog_identity_and_target_action_refs",
+        "stage_manifest_identity_and_digest",
+        "target_stage_id",
+        "target_stage_prompt",
+        "target_stage_quality_policy_when_declared",
+        "target_stage_quality_refs",
+        "target_stage_action_refs",
+        "target_stage_next_refs",
+        "target_stage_handoff_and_review_lane"
+      ],
+      "unrelated_stage_quality_or_prompt_errors_block_target_launch": false,
+      "unrelated_stage_projection_errors_block_target_launch": false,
+      "full_pack_compile_reserved_for": [
+        "package_qualification",
+        "generated_surface_projection",
+        "whole_pack_conformance",
+        "cross_stage_route_parity"
+      ],
+      "hard_boundaries_remain": [
+        "identity",
+        "permission_or_credential",
+        "executor_availability",
+        "authority_boundary",
+        "currentness",
+        "forbidden_write",
+        "irreversible_action",
+        "explicit_human_gate"
+      ]
+    }
   },
   "domain_lifecycle_admission": {
     "capability_id": "opl_domain_lifecycle_admission.v1",

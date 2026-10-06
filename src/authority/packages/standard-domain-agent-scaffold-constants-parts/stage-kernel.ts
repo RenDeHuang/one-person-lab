@@ -112,6 +112,8 @@ export const STAGE_RUN_KERNEL_PROFILE = {
       'evaluation_refs',
     ],
     advisory_refs_can_block_launch: false,
+    target_stage_binding_compile: true,
+    full_pack_compile_is_not_stage_launch_gate: true,
   },
   default_read_surface: {
     root: 'stage_run_current_owner_delta',

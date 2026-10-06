@@ -71,7 +71,7 @@ export const GENERATED_SURFACES = [
   },
   {
     surface_id: 'product_entry_manifest',
-    required_descriptor_surfaces: ['entry', 'family_action_catalog', 'family_stage_control_plane'],
+    required_descriptor_surfaces: ['entry', 'family_action_catalog'],
   },
   {
     surface_id: 'domain_handler',
@@ -83,7 +83,7 @@ export const GENERATED_SURFACES = [
   },
   {
     surface_id: 'workbench_drilldown',
-    required_descriptor_surfaces: ['family_stage_control_plane', 'domain_memory_descriptor', 'runtime_surfaces'],
+    required_descriptor_surfaces: ['domain_memory_descriptor', 'runtime_surfaces', 'family_action_catalog'],
   },
 ] as const;
 
@@ -216,7 +216,7 @@ function buildGeneratedDefaultEntryNoResurrectionGate(
   const stageCatalogRef =
     stageCatalogRefs[0]
     ?? (stageControlPlane ? `family_stage_control_plane:${stageControlPlane.plane_id}` : null);
-  const lineageReady = Boolean(catalog && sourceActionIds.length > 0 && stageCatalogRef);
+  const lineageReady = Boolean(catalog && sourceActionIds.length > 0);
 
   return {
     surface_kind: 'opl_generated_default_entry_no_resurrection_gate',
@@ -227,7 +227,7 @@ function buildGeneratedDefaultEntryNoResurrectionGate(
     default_entry_policy_ref: 'generated_agent_interfaces.default_entry_policy',
     source_of_work_lineage_ref: 'generated_agent_interfaces.source_of_work_lineage',
     required_default_entry_surface_ids: [...GENERATED_DEFAULT_ENTRY_SURFACE_IDS],
-    required_lineage_policy: 'each_default_entry_surface_carries_source_of_work_lineage',
+    required_lineage_policy: 'each_default_entry_surface_carries_action_catalog_source_of_work_lineage; stage_catalog_ref_is_optional_projection_context',
     domain_repo_wrapper_policy: 'handler_target_refs_only_adapter_or_tombstone_candidate',
     domain_repo_can_own_default_entry: false,
     descriptor_pass_can_claim_domain_ready: false,
@@ -466,12 +466,17 @@ function buildDomainHandlerDescriptors(catalog: FamilyActionCatalog | null, work
     });
 }
 
-function buildProductSessionDescriptor(stageControlPlane: FamilyStageControlPlane | null) {
+function buildProductSessionDescriptor(
+  catalog: FamilyActionCatalog | null,
+  stageControlPlane: FamilyStageControlPlane | null,
+) {
   return {
     surface_kind: 'opl_generated_product_session_descriptor',
     owner: 'one-person-lab',
-    status: stageControlPlane ? 'ready_from_stage_control_plane' : 'blocked_missing_family_stage_control_plane',
-    descriptor_source_surfaces: ['family_stage_control_plane', 'session_continuity_or_stage_routes'],
+    status: catalog
+      ? (stageControlPlane ? 'ready_from_stage_control_plane' : 'ready_from_action_catalog_with_stage_projection_debt')
+      : 'blocked_missing_family_action_catalog',
+    descriptor_source_surfaces: ['family_action_catalog', 'session_continuity_or_stage_routes'],
     session_routes: buildStageRoutes(stageControlPlane),
     authority_boundary: {
       product_session_can_write_domain_truth: false,
@@ -483,18 +488,24 @@ function buildProductSessionDescriptor(stageControlPlane: FamilyStageControlPlan
 
 function buildProductSessionDescriptorFromDescriptor(
   descriptor: JsonRecord,
+  catalog: FamilyActionCatalog | null,
   stageControlPlane: FamilyStageControlPlane | null,
 ) {
   const sessionContinuity = descriptorRecord(descriptor, 'session_continuity_contract');
   const sessionSurface = sessionContinuity ? descriptorRecord(sessionContinuity, 'entry_surface') : null;
   const restoreSurface = sessionContinuity ? descriptorRecord(sessionContinuity, 'restore_surface') : null;
   return {
-    ...buildProductSessionDescriptor(stageControlPlane),
+    ...buildProductSessionDescriptor(
+      catalog,
+      stageControlPlane,
+    ),
     status:
       sessionContinuity || stageControlPlane
         ? 'ready_from_session_continuity_or_stage_control_plane'
-        : 'blocked_missing_session_continuity_and_stage_control_plane',
-    descriptor_source_surfaces: ['session_continuity', 'family_stage_control_plane'],
+        : descriptorRecord(descriptor, 'family_action_catalog')
+          ? 'ready_from_action_catalog_with_stage_projection_debt'
+          : 'blocked_missing_session_continuity_and_family_action_catalog',
+    descriptor_source_surfaces: ['session_continuity', 'family_action_catalog', 'family_stage_control_plane'],
     session_continuity_status: optionalString(sessionContinuity?.status),
     entry_surface: sessionSurface,
     restore_surface: restoreSurface,
@@ -537,8 +548,10 @@ function buildWorkbenchDescriptorBlock(
   return {
     surface_kind: 'opl_hosted_workbench_descriptor',
     owner: 'one-person-lab',
-    status: stageControlPlane ? 'ready_from_stage_control_plane' : 'blocked_missing_family_stage_control_plane',
-    descriptor_source_surfaces: ['family_stage_control_plane', 'domain_memory_descriptor', 'runtime_surfaces'],
+    status: catalog
+      ? (stageControlPlane ? 'ready_from_stage_control_plane' : 'ready_from_action_catalog_with_stage_projection_debt')
+      : 'blocked_missing_family_action_catalog',
+    descriptor_source_surfaces: ['family_action_catalog', 'family_stage_control_plane', 'domain_memory_descriptor', 'runtime_surfaces'],
     source_of_work_lineage: buildSourceOfWorkLineage(catalog, stageControlPlane),
     default_source_of_work: defaultSourceOfWork(catalog, stageControlPlane, workspacePath),
     source_of_work_consumption_policy:
@@ -661,7 +674,7 @@ export function buildGeneratedInterfaceBundle(
     },
   }, sourceBlockedReason);
   const productSession = projectStandardAgentContractBlock(
-    buildProductSessionDescriptorFromDescriptor(descriptor, stageControlPlane),
+    buildProductSessionDescriptorFromDescriptor(descriptor, catalog, stageControlPlane),
     sourceBlockedReason,
   );
   const domainHandler = projectStandardAgentContractBlock(
