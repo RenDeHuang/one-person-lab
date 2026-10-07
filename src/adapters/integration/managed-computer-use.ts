@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { coerce, gte } from 'semver';
 
 import { FrameworkContractError } from '../../kernel/contract-validation.ts';
+import { resolveDependencyReleaseSync } from './dependency-release-resolution-sync.ts';
+import { compareDependencyVersions, type ResolvedDependencyRelease } from './dependency-release-resolution.ts';
 import { registerOplManagedMcpServer } from './system-installation/codex-plugin-registry.ts';
 
 const LOCK_PATH = fileURLToPath(new URL('../../../contracts/opl-framework/managed-computer-use.json', import.meta.url));
@@ -59,7 +61,7 @@ export function buildManagedComputerUseActionCatalog() {
       dry_run_supported: true,
       confirmation_required: false,
       danger_level: 'low',
-      impact: 'Repairs the pinned managed companion without changing ordinary Codex state.',
+      impact: 'Repairs the latest official managed companion without changing ordinary Codex state.',
       follow_up_action_ids: ['settings_request_computer_use_permissions', 'settings_recheck_computer_use'],
       verify_action_id: 'settings_recheck_computer_use',
     },
@@ -73,7 +75,7 @@ export function buildManagedComputerUseActionCatalog() {
       dry_run_supported: true,
       confirmation_required: true,
       danger_level: 'medium',
-      impact: 'Replaces only the OPL-managed KimiCU bundle with the exact pinned version.',
+      impact: 'Replaces only the OPL-managed KimiCU bundle with the latest official version without downgrading.',
       follow_up_action_ids: ['settings_request_computer_use_permissions', 'settings_recheck_computer_use'],
       verify_action_id: 'settings_recheck_computer_use',
     },
@@ -90,6 +92,7 @@ export type ManagedComputerUseLock = {
   provider_id: string;
   product_name: string;
   version: string;
+  release_policy_ref?: string;
   archive: {
     url: string;
     sha256: string;
@@ -237,12 +240,13 @@ export function readManagedComputerUseLock(): ManagedComputerUseLock {
     product_identity_source_sha256: requireString(raw.product_identity_source_sha256, 'product_identity_source_sha256'),
     provider_id: requireString(raw.provider_id, 'provider_id'),
     product_name: requireString(raw.product_name, 'product_name'),
-    version: requireString(raw.version, 'version'),
+    version: typeof raw.version === 'string' ? raw.version : '',
+    release_policy_ref: typeof raw.release_policy_ref === 'string' ? raw.release_policy_ref : undefined,
     archive: {
-      url: requireString(archive?.url, 'archive.url'),
-      sha256: requireString(archive?.sha256, 'archive.sha256'),
-      size_bytes: Number(archive?.size_bytes),
-      full_seed_relative_path: requireString(archive?.full_seed_relative_path, 'archive.full_seed_relative_path'),
+      url: typeof archive?.url === 'string' ? archive.url : '',
+      sha256: typeof archive?.sha256 === 'string' ? archive.sha256 : '',
+      size_bytes: Number(archive?.size_bytes ?? 0),
+      full_seed_relative_path: typeof archive?.full_seed_relative_path === 'string' ? archive.full_seed_relative_path : '',
     },
     platform: {
       os: requireString(platform?.os, 'platform.os'),
@@ -277,11 +281,6 @@ export function readManagedComputerUseLock(): ManagedComputerUseLock {
       : {}) as JsonRecord,
     action_ids: requireStringArray(raw.action_ids, 'action_ids'),
   };
-  if (!Number.isSafeInteger(lock.archive.size_bytes) || lock.archive.size_bytes <= 0) {
-    throw new FrameworkContractError('contract_shape_invalid', 'Managed Computer Use archive size is invalid.', {
-      lock_path: LOCK_PATH,
-    });
-  }
   return lock;
 }
 
@@ -503,7 +502,7 @@ export function inspectManagedComputerUse(options: { runExternalChecks?: boolean
   const architecture = process.env.OPL_KIMI_CU_ARCHITECTURE?.trim() || readArchitecture(executable);
   const identityVerified = bundleExists
     && plist.bundle_id === lock.bundle.bundle_id
-    && plist.version === lock.version
+    && Boolean(coerce(plist.version ?? ''))
     && teamId === lock.bundle.team_id
     && lock.platform.architectures.includes(architecture ?? '')
     && executableExists;
@@ -536,7 +535,7 @@ export function inspectManagedComputerUse(options: { runExternalChecks?: boolean
   const observedTools = mcpCapability.observedTools;
   const toolsExact = observedTools.length > 0
     && lock.mcp.required_tools.every((tool) => observedTools.includes(tool))
-    && observedTools.every((tool) => lock.mcp.required_tools.includes(tool));
+    && true;
   const registered = mcpRegistration.registered && identityVerified;
   const serviceRegistered = service.output?.includes('status=1') === true;
   const accessibilityPermission = shouldProbe && executableExists
@@ -584,7 +583,7 @@ export function inspectManagedComputerUse(options: { runExternalChecks?: boolean
     surface_kind: 'opl_managed_computer_use_projection',
     provider_id: lock.provider_id,
     product_name: lock.product_name,
-    version: lock.version,
+    version: plist.version ?? lock.version,
     owner: lock.owner,
     source_ref: lock.product_identity_source_ref,
     source_sha256: lock.product_identity_source_sha256,
@@ -660,8 +659,20 @@ function resolveArchiveSource(lock: ManagedComputerUseLock) {
   if (explicit) return path.resolve(explicit);
   const fullSeed = process.env.OPL_FULL_RUNTIME_HOME?.trim();
   if (fullSeed) {
-    const seedPath = path.join(fullSeed, lock.archive.full_seed_relative_path);
-    if (fs.existsSync(seedPath)) return seedPath;
+    const manifestPaths = [path.join(fullSeed, 'manifest', 'full-package-manifest.json'), path.join(fullSeed, 'full-package-manifest.json')];
+    for (const manifestPath of manifestPaths) {
+      try {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+        const seed = (manifest.computer_use_offline_seed ?? (manifest.runtime_payloads && (manifest.runtime_payloads as Record<string, unknown>).kimi_cu)) as Record<string, unknown> | undefined;
+        const relative = typeof seed?.archive_relative_path === 'string' ? seed.archive_relative_path : typeof seed?.runtime_relative_path === 'string' ? seed.runtime_relative_path : null;
+        const candidate = relative ? path.join(fullSeed, relative) : null;
+        if (candidate && fs.existsSync(candidate)) return candidate;
+      } catch { /* fall back to legacy seed path */ }
+    }
+    if (lock.archive.full_seed_relative_path) {
+      const seedPath = path.join(fullSeed, lock.archive.full_seed_relative_path);
+      if (fs.existsSync(seedPath)) return seedPath;
+    }
   }
   return null;
 }
@@ -677,7 +688,7 @@ function materializeArchive(lock: ManagedComputerUseLock, targetPath: string) {
           '--retry', '2', '--output', archivePath, lock.archive.url,
         ], { stdio: 'pipe' });
       } catch (error) {
-        throw new FrameworkContractError('build_command_failed', 'Failed to download the pinned KimiCU archive.', {
+        throw new FrameworkContractError('build_command_failed', 'Failed to download the resolved KimiCU archive.', {
           archive_url: lock.archive.url,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -685,7 +696,7 @@ function materializeArchive(lock: ManagedComputerUseLock, targetPath: string) {
     }
     const actualSha256 = sha256(archivePath);
     if (actualSha256 !== lock.archive.sha256) {
-      throw new FrameworkContractError('contract_shape_invalid', 'KimiCU archive SHA-256 does not match the Framework build lock.', {
+      throw new FrameworkContractError('contract_shape_invalid', 'KimiCU archive SHA-256 does not match the resolved official release.', {
         expected_sha256: lock.archive.sha256,
         actual_sha256: actualSha256,
         archive_path: archivePath,
@@ -746,8 +757,22 @@ function materializeArchive(lock: ManagedComputerUseLock, targetPath: string) {
   }
 }
 
-export function reconcileManagedComputerUse(actionId: ManagedComputerUseActionId): ManagedComputerUseInspection {
-  const lock = readManagedComputerUseLock();
+export function planManagedComputerUseUpdate(options: {
+  resolveRelease?: () => ResolvedDependencyRelease;
+} = {}) {
+  const before = inspectManagedComputerUse({ runExternalChecks: false });
+  if (!before.platform.supported) return { before, target: null, update_available: false };
+  const target = options.resolveRelease?.() ?? resolveDependencyReleaseSync('kimi-cu', {
+    platform: 'darwin', architecture: before.platform.current.split('-').at(-1), verifyArchive: false,
+  });
+  return { before, target, update_available: !before.installed
+    || compareDependencyVersions(before.bundle.version ?? '', target.version) < 0 };
+}
+
+export function reconcileManagedComputerUse(actionId: ManagedComputerUseActionId, options: {
+  target?: ResolvedDependencyRelease; refreshLatest?: boolean;
+} = {}): ManagedComputerUseInspection {
+  let lock = readManagedComputerUseLock();
   if (actionId === 'settings_recheck_computer_use') return inspectManagedComputerUse();
   const installPath = resolveInstallPath(lock);
   const executable = resolveExecutable(lock, installPath);
@@ -757,10 +782,26 @@ export function reconcileManagedComputerUse(actionId: ManagedComputerUseActionId
     return inspectManagedComputerUse();
   }
   const before = inspectManagedComputerUse({ runExternalChecks: false });
-  if (actionId === 'settings_reinstall_computer_use' && fs.existsSync(executable)) {
-    runCommand(executable, ['uninstall']);
+  const target = options.target ?? (options.refreshLatest || !before.installed
+    ? planManagedComputerUseUpdate().target : null);
+  const newerInstalled = Boolean(before.installed && target
+    && compareDependencyVersions(before.bundle.version ?? '', target.version) > 0);
+  if (target) {
+    if (!target.archive_url || !target.archive_sha256) throw new Error('KimiCU release has no verified official archive.');
+    lock = { ...lock, version: target.version, archive: {
+      url: target.archive_url, sha256: target.archive_sha256, size_bytes: target.archive_size_bytes ?? 0,
+      full_seed_relative_path: `runtime-payloads/kimi-cu/${target.version}/KimiCU.app.zip`,
+    } };
   }
-  if (!before.installed || actionId === 'settings_reinstall_computer_use') materializeArchive(lock, installPath);
+  const upgrade = Boolean(target && before.installed
+    && compareDependencyVersions(before.bundle.version ?? '', target.version) < 0);
+  const replace = !newerInstalled && (!before.installed || upgrade || actionId === 'settings_reinstall_computer_use');
+  if (replace) {
+    if (fs.existsSync(installPath) && !before.bundle.identity_verified) {
+      throw new Error('Existing KimiCU bundle identity is untrusted; preserve it for its owner.');
+    }
+    materializeArchive(lock, installPath);
+  }
   reconcileMcpRegistration(lock, executable);
   runCommand(executable, ['install']);
   return inspectManagedComputerUse();

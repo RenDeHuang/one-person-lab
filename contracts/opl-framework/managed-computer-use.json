@@ -5,17 +5,12 @@
   "product_identity_source_sha256": "6b163eae2bacee4ba07eaa639bb645c257be89a8fee8dfda52e317addc6d04f9",
   "provider_id": "kimi-cu",
   "product_name": "KimiCU",
-  "version": "0.5.4",
-  "archive": {
-    "url": "https://cdn.kimi.com/kimi-computer-use/0.5.4/KimiCU.app.zip",
-    "sha256": "77a7515cf7fd4b7bfa46a95eab0dff7378d00a2c5003bcf7ad93f17667e2808e",
-    "size_bytes": 1498360,
-    "full_seed_relative_path": "runtime-payloads/kimi-cu/0.5.4/KimiCU.app.zip"
-  },
   "platform": {
     "os": "darwin",
     "minimum_version": "14.0",
-    "architectures": ["arm64"]
+    "architectures": [
+      "arm64"
+    ]
   },
   "bundle": {
     "bundle_id": "ai.kimi.cu",
@@ -25,7 +20,11 @@
   },
   "mcp": {
     "server_id": "kimi-cu",
-    "args": ["mcp", "-s", "user"],
+    "args": [
+      "mcp",
+      "-s",
+      "user"
+    ],
     "required_tools": [
       "list_apps",
       "get_app_state",
@@ -41,13 +40,26 @@
     "default_enabled": true
   },
   "health": {
-    "service_status_args": ["service-status"],
-    "xpc_ping_args": ["xpc-ping"],
-    "permission_status_args": ["doctor"],
-    "mcp_handshake": ["initialize", "tools/list", "tools/call:list_apps"]
+    "service_status_args": [
+      "service-status"
+    ],
+    "xpc_ping_args": [
+      "xpc-ping"
+    ],
+    "permission_status_args": [
+      "doctor"
+    ],
+    "mcp_handshake": [
+      "initialize",
+      "tools/list",
+      "tools/call:list_apps"
+    ]
   },
   "permission_model": {
-    "required": ["accessibility", "screen_recording"],
+    "required": [
+      "accessibility",
+      "screen_recording"
+    ],
     "missing_state": "permission_required",
     "ready_requires": [
       "bundle_identity_verified",
@@ -61,8 +73,8 @@
     ]
   },
   "distribution_parity": {
-    "standard": "download_and_verify_exact_archive",
-    "full": "materialize_and_verify_exact_bundled_seed",
+    "standard": "resolve_latest_official_archive",
+    "full": "resolved_build_seed_then_same_update_policy",
     "same_identity_required": true,
     "same_runtime_behavior_required": true,
     "network_difference_allowed_after_install": false
@@ -72,5 +84,6 @@
     "settings_recheck_computer_use",
     "settings_repair_computer_use",
     "settings_reinstall_computer_use"
-  ]
+  ],
+  "release_policy_ref": "contracts/opl-framework/dependency-release-sources.json#kimi-cu"
 }
