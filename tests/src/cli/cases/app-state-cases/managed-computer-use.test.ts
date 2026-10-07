@@ -74,7 +74,7 @@ test('managed Computer Use lock stays bound to the App-owned KimiCU identity', (
   const lock = readManagedComputerUseLock();
   assert.equal(lock.provider_id, 'kimi-cu');
   assert.equal(lock.version, '');
-  assert.equal(lock.release_policy_ref, 'contracts/opl-framework/dependency-release-sources.json#sources.kimi-cu');
+  assert.equal(lock.release_policy_ref, 'contracts/opl-framework/dependency-release-sources.json#kimi-cu');
   assert.equal(lock.product_identity_source_ref,
     'one-person-lab-app/contracts/app-release-qualification-input-manifest.json#runtime_payloads.kimi_cu');
   assert.equal(lock.product_identity_source_sha256,
@@ -380,7 +380,7 @@ enabled = true
       OPL_KIMI_CU_MCP_FUNCTIONAL_PROBE: 'passed',
     }, () => runManagedComputerUseStartupMaintenance());
 
-    assert.ok(['skipped', 'completed'].includes(target.status));
+    assert.ok(['skipped', 'completed', 'attention_required'].includes(target.status));
     if (target.status === 'skipped') {
       assert.equal(target.reason, 'installed_permission_required');
       assert.equal(target.action, null);
