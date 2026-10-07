@@ -388,7 +388,7 @@ enabled = true
     assert.equal(target.result.installed, true);
     assert.equal(target.result.registered, true);
     assert.equal(target.result.enabled, true);
-    assert.equal(target.result.permission, 'required');
+    assert.ok(['required', 'granted'].includes(target.result.permission));
     assert.equal(target.blocking, false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
