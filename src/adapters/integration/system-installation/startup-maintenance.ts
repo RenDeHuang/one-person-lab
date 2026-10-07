@@ -8,11 +8,13 @@ import { recordManagedInstallUpdateReceipts } from '../managed-install-update-le
 import { acquireManagedUpdateLock } from '../managed-update-lock.ts';
 import {
   inspectManagedBrowserAutomation,
+  planManagedBrowserAutomationUpdate,
   reconcileManagedBrowserAutomation,
   type ManagedBrowserAutomationInspection,
 } from '../managed-browser-automation.ts';
 import {
   inspectManagedComputerUse,
+  planManagedComputerUseUpdate,
   reconcileManagedComputerUse,
   type ManagedComputerUseInspection,
 } from '../managed-computer-use.ts';
@@ -380,7 +382,8 @@ export function runManagedComputerUseStartupMaintenance(): StartupMaintenanceMan
       blocking: false,
     };
   }
-  if (before.status === 'ready' || before.status === 'permission_required') {
+  const plan = planManagedComputerUseUpdate();
+  if ((before.status === 'ready' || before.status === 'permission_required') && !plan.update_available) {
     return {
       target_type: 'managed_companion',
       target_id: 'kimi-cu',
@@ -394,7 +397,10 @@ export function runManagedComputerUseStartupMaintenance(): StartupMaintenanceMan
   }
 
   try {
-    const result = reconcileManagedComputerUse('settings_repair_computer_use');
+    const result = reconcileManagedComputerUse('settings_repair_computer_use', {
+      target: plan.target ?? undefined,
+      refreshLatest: true,
+    });
     const materialized = result.status === 'ready' || result.status === 'permission_required';
     return {
       target_type: 'managed_companion',
@@ -434,7 +440,8 @@ export function runManagedBrowserAutomationStartupMaintenance(): StartupMaintena
       blocking: false,
     };
   }
-  if (before.status === 'ready') {
+  const plan = planManagedBrowserAutomationUpdate();
+  if (before.status === 'ready' && !plan.update_available) {
     return {
       target_type: 'managed_companion',
       target_id: 'playwright-mcp',
@@ -448,7 +455,10 @@ export function runManagedBrowserAutomationStartupMaintenance(): StartupMaintena
   }
 
   try {
-    const result = reconcileManagedBrowserAutomation('settings_repair_browser_automation');
+    const result = reconcileManagedBrowserAutomation('settings_repair_browser_automation', {
+      target: plan.target ?? undefined,
+      refreshLatest: true,
+    });
     return {
       target_type: 'managed_companion',
       target_id: 'playwright-mcp',
