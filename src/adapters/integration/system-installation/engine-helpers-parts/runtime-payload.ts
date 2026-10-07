@@ -1,3 +1,5 @@
+import { resolveDependencyReleaseSync } from '../../dependency-release-resolution-sync.ts';
+import { compareDependencyVersions } from '../../dependency-release-resolution.ts';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -175,7 +177,13 @@ export function resolvePreseedTarballPath(envKey: string) {
 }
 
 function resolveCodexPackageInstallSpec() {
-  return resolvePreseedTarballPath('OPL_FIRST_RUN_CODEX_PACKAGE_TARBALL') ?? '@openai/codex@latest';
+  const seed = resolvePreseedTarballPath('OPL_FIRST_RUN_CODEX_PACKAGE_TARBALL');
+  // A seed is used only for a first install; installed generations always resolve the current upstream target.
+  const paths = resolveOplRuntimeToolchainPaths();
+  if (seed && !fs.existsSync(paths.current_codex_path)) return seed;
+  const configured = normalizeOptionalString(process.env.OPL_CODEX_CLI_LATEST_VERSION);
+  const version = configured ?? resolveDependencyReleaseSync('codex-cli', { verifyArchive: false }).version;
+  return `@openai/codex@${version}`;
 }
 
 export function resolveCodexPlatformPackageTarball() {
@@ -260,6 +268,14 @@ async function applyCodexVendorToRuntime(
       verification,
       protocol_verification: protocolVerification,
     };
+  }
+
+  const currentVersion = fs.existsSync(paths.current_codex_path)
+    ? verifyCodexExecutable(paths.current_codex_path).parsed_version : null;
+  if (currentVersion && verification.parsed_version
+    && compareDependencyVersions(currentVersion, verification.parsed_version) > 0) {
+    fs.rmSync(generationRoot, { recursive: true, force: true });
+    return { applied: false, reason: 'newer_installed_codex_preserved', runtime_binary_path: paths.current_codex_path, verification };
   }
 
   let rgPath: string | null = null;

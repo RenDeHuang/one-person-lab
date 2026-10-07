@@ -7,12 +7,10 @@
   "product_name": "Browser Automation",
   "runtime": {
     "package_name": "@playwright/mcp",
-    "package_version": "0.0.79",
-    "package_integrity": "sha512-VpqD4a3vFyGQMY9sh3UJiO6wjcurggkljKfAyCHL0QWGY5m6Ehr3MNsAAHPDHO//n13g0PCjpHatAOiulrqdZQ==",
     "entrypoint": "cli.js",
     "node_minimum_version": "20.0.0",
-    "dependency_source_ref": "package.json#dependencies.@playwright/mcp",
-    "carrier": "current_framework_node_process"
+    "dependency_source_ref": "contracts/opl-framework/dependency-release-sources.json#playwright-mcp",
+    "carrier": "opl_managed_npm_with_framework_first_run_seed"
   },
   "mcp": {
     "server_id": "playwright",

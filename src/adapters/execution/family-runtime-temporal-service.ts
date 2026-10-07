@@ -1,3 +1,4 @@
+import { managedTemporalCliPath } from './managed-temporal-cli.mjs';
 import fs from 'node:fs';
 import net from 'node:net';
 import { spawn } from 'node:child_process';
@@ -286,6 +287,7 @@ export function resolveTemporalServiceLauncher(
   const pathDirs = (env.PATH ?? '').split(path.delimiter).filter(Boolean);
   const temporalCli = [
     ...(explicitTemporalCli ? [explicitTemporalCli] : []),
+    managedTemporalCliPath(),
     ...pathDirs.map((dir) => path.join(dir, 'temporal')),
   ].map(executablePath).find((candidate): candidate is string => Boolean(candidate));
   if (temporalCli) {
@@ -468,7 +470,7 @@ export async function startTemporalServiceLifecycle(
   }
   let resolvedLauncher = resolveTemporalServiceLauncher(paths);
   const localAddress = parseTemporalAddress(resolveTemporalAddress() ?? '127.0.0.1:7233');
-  if (!resolvedLauncher && process.platform === 'linux' && process.arch === 'x64'
+  if (!resolvedLauncher && ['darwin', 'linux'].includes(process.platform)
     && !process.env.OPL_TEMPORAL_CLI_PATH?.trim() && !process.env.OPL_TEMPORAL_SERVICE_START_COMMAND?.trim()
     && ['127.0.0.1', 'localhost'].includes(localAddress.host)) {
     const installation = installTemporalCli();

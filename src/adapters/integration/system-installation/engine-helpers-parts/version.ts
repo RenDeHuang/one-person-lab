@@ -1,3 +1,4 @@
+import { resolveDependencyReleaseSync } from '../../dependency-release-resolution-sync.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -166,28 +167,11 @@ export function resolveLatestCodexCliVersion(options: { preferOffline?: boolean 
   const configuredVersion = resolveConfiguredLatestCodexCliVersion();
   if (configuredVersion) return configuredVersion;
 
-  let result;
   try {
-    result = runCommand(
-      'npm',
-      [
-        'view',
-        '@openai/codex',
-        'version',
-        '--silent',
-        ...(options.preferOffline ? ['--prefer-offline'] : []),
-      ],
-      undefined,
-      { timeoutMs: resolveCodexLatestTimeoutMs() },
-    );
+    return resolveDependencyReleaseSync('codex-cli', { verifyArchive: false }).version;
   } catch {
     return null;
   }
-  if (result.exitCode !== 0 || result.timedOut) {
-    return null;
-  }
-
-  return parseCliVersion(normalizeOutput(result.stdout, result.stderr))?.version ?? null;
 }
 
 export function resolveVersionStatus(rawVersion: string | null, minimumVersion: string) {

@@ -1,3 +1,4 @@
+import { resolveDependencyReleaseSync } from './dependency-release-resolution-sync.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -217,30 +218,20 @@ function newestStableVersion(versions: Array<string | null>) {
   });
 }
 
-function latestTemporalVersion(brew: string | null) {
-  const cohortVersion = readTemporalStableCohort().cli.version;
+function latestTemporalVersion(refresh: boolean) {
   const configured = exactStableVersion(process.env.OPL_TEMPORAL_CLI_LATEST_VERSION?.trim());
-  let brewStable: string | null = null;
-  const raw = brew ? output(brew, ['info', '--json=v2', 'temporal']) : null;
-  if (raw) {
-    try {
-      const payload = JSON.parse(raw) as { formulae?: Array<{ versions?: { stable?: unknown } }> };
-      brewStable = exactStableVersion(payload.formulae?.[0]?.versions?.stable);
-    } catch {
-      brewStable = null;
-    }
-  }
-  return newestStableVersion([cohortVersion, configured, brewStable]);
+  if (configured || !refresh) return configured;
+  try { return resolveDependencyReleaseSync('temporal-cli', { verifyArchive: false }).version; }
+  catch { return null; }
 }
 
 export function inspectExternalTemporalInstallation(
   options: { refreshLatest?: boolean; inspectVersion?: boolean; inspectOwner?: boolean } = {},
 ): ExternalDependencyInstallation {
-  const cohortVersion = readTemporalStableCohort().cli.version;
   const binaryPath = process.env.OPL_TEMPORAL_BIN?.trim() || findExecutable('temporal');
   if (!binaryPath) {
     return {
-      dependency_id: 'temporal-system-cli', installed: false, binary_path: null, version: null, latest_version: cohortVersion,
+      dependency_id: 'temporal-system-cli', installed: false, binary_path: null, version: null, latest_version: latestTemporalVersion(options.refreshLatest === true),
       currentness: 'missing', ownership: 'missing', update_mode: 'detect_only_guidance', update_action: null,
       guidance: 'No system Temporal CLI was detected. OPL-managed Temporal SDK runtime remains part of the OPL Base generation.',
     };
@@ -248,7 +239,7 @@ export function inspectExternalTemporalInstallation(
   const version = options.inspectVersion === false ? null : output(binaryPath, ['--version']);
   const brew = options.inspectOwner === false ? null : brewBinary();
   const owner = brew && isHomebrewFormulaOwner(binaryPath, 'temporal') ? 'homebrew_formula' : 'global_path';
-  const latest = latestTemporalVersion(options.refreshLatest && brew ? brew : null);
+  const latest = latestTemporalVersion(options.refreshLatest === true);
   const action = owner === 'homebrew_formula' ? updateAction('temporal-system-cli', owner) : null;
   return {
     dependency_id: 'temporal-system-cli', installed: true, binary_path: binaryPath,

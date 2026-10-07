@@ -1,3 +1,4 @@
+import { resolveDependencyReleaseSync } from '../dependency-release-resolution-sync.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -79,21 +80,10 @@ function resolveLatestToolVersion(toolId: OplCompanionToolId): LatestToolVersion
       source: output ? 'github_tags' : null,
     };
   }
-  if (toolId === 'officecli') {
-    const output = runCommandForOutput(
-      'git',
-      ['ls-remote', '--tags', '--refs', process.env.OPL_OFFICECLI_REPO_URL?.trim() || 'https://github.com/iOfficeAI/OfficeCLI.git'],
-    );
-    return {
-      version: output ? maxVersion(output.split('\n').map((line) => line.split('refs/tags/')[1] ?? '')) : null,
-      source: output ? 'github_tags' : null,
-    };
-  }
-  const output = runCommandForOutput('npm', ['view', 'mineru-open-api', 'version', '--silent']);
-  return {
-    version: parseVersion(output)?.version ?? null,
-    source: output ? 'npm_registry' : null,
-  };
+  try {
+    const resolved = resolveDependencyReleaseSync(toolId, { verifyArchive: false });
+    return { version: resolved.version, source: toolId === 'officecli' ? 'github_tags' : 'npm_registry' };
+  } catch { return { version: null, source: null }; }
 }
 
 export function resolveOplCompanionTool(
@@ -137,9 +127,9 @@ function buildOfficeCliInstallCommand() {
     || 'curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash';
 }
 
-function buildMineruOpenApiInstallCommand() {
+function buildMineruOpenApiInstallCommand(version: string) {
   return process.env.OPL_MINERU_OPEN_API_INSTALL_COMMAND?.trim()
-    || 'npm install -g mineru-open-api@latest';
+    || `npm install -g mineru-open-api@${version}`;
 }
 
 function failedTool(
@@ -205,7 +195,11 @@ function installMineruOpenApiTool(
   const localBin = path.join(localPrefix, 'bin');
   fs.mkdirSync(localBin, { recursive: true });
   ensurePathEntry(localBin);
-  const result = spawnSync(process.env.SHELL?.trim() || '/bin/bash', ['-lc', buildMineruOpenApiInstallCommand()], {
+  const target = latest ?? resolveLatestToolVersion('mineru-open-api');
+  if (!target.version && !process.env.OPL_MINERU_OPEN_API_INSTALL_COMMAND?.trim()) {
+    return failedTool('mineru-open-api', action, 'failed', 'Latest supported MinerU release could not be resolved.');
+  }
+  const result = spawnSync(process.env.SHELL?.trim() || '/bin/bash', ['-lc', buildMineruOpenApiInstallCommand(target.version ?? '')], {
     encoding: 'utf8',
     timeout: 300_000,
     killSignal: 'SIGKILL',
@@ -219,7 +213,7 @@ function installMineruOpenApiTool(
       status: action === 'update' ? 'updated' as const : 'installed' as const,
       action,
       ownership: 'opl_managed' as const,
-    }, latest ?? resolveLatestToolVersion('mineru-open-api'));
+    }, target);
     writeManagedToolReceipt(managed);
     return managed;
   }

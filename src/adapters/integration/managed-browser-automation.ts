@@ -1,3 +1,5 @@
+import { resolveDependencyReleaseSync } from './dependency-release-resolution-sync.ts';
+import { compareDependencyVersions, type ResolvedDependencyRelease } from './dependency-release-resolution.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -168,8 +170,8 @@ export function readManagedBrowserAutomationLock(): ManagedBrowserAutomationLock
     product_name: requireString(raw.product_name, 'product_name'),
     runtime: {
       package_name: requireString(runtime?.package_name, 'runtime.package_name'),
-      package_version: requireString(runtime?.package_version, 'runtime.package_version'),
-      package_integrity: requireString(runtime?.package_integrity, 'runtime.package_integrity'),
+      package_version: typeof runtime?.package_version === 'string' ? runtime.package_version : '',
+      package_integrity: typeof runtime?.package_integrity === 'string' ? runtime.package_integrity : '',
       entrypoint: requireString(runtime?.entrypoint, 'runtime.entrypoint'),
       node_minimum_version: requireString(runtime?.node_minimum_version, 'runtime.node_minimum_version'),
       dependency_source_ref: requireString(runtime?.dependency_source_ref, 'runtime.dependency_source_ref'),
@@ -233,7 +235,7 @@ export function buildManagedBrowserAutomationActionCatalog() {
       dry_run_supported: true,
       confirmation_required: false,
       danger_level: 'low',
-      impact: 'Repairs only the pinned Playwright MCP entry in the existing Codex registry.',
+      impact: 'Repairs only the managed Playwright MCP entry in the existing Codex registry.',
       follow_up_action_ids: ['settings_recheck_browser_automation'],
       verify_action_id: 'settings_recheck_browser_automation',
     },
@@ -254,6 +256,8 @@ function resolvePackageRoot(lock: ManagedBrowserAutomationLock) {
   const explicit = process.env.OPL_PLAYWRIGHT_MCP_PACKAGE_ROOT?.trim();
   if (explicit) return path.resolve(explicit);
   try {
+    const managed = path.join(resolveOplStatePaths().state_dir, 'managed-browser-automation', 'runtime', 'node_modules', '@playwright', 'mcp');
+    if (fs.existsSync(path.join(managed, lock.runtime.entrypoint))) return managed;
     return path.dirname(require.resolve(`${lock.runtime.package_name}/package.json`));
   } catch {
     return null;
@@ -424,7 +428,7 @@ export function inspectManagedBrowserAutomation(
   const packageRoot = resolvePackageRoot(lock);
   const packageVersion = readPackageVersion(packageRoot);
   const entrypoint = packageRoot ? path.join(packageRoot, lock.runtime.entrypoint) : null;
-  const packageIdentityVerified = packageVersion === lock.runtime.package_version
+  const packageIdentityVerified = Boolean(coerce(packageVersion ?? ''))
     && Boolean(entrypoint && fs.existsSync(entrypoint));
   const outputDir = resolveOutputDir();
   const hostBrowserExecutable = resolveHostBrowserExecutable(lock);
@@ -457,7 +461,7 @@ export function inspectManagedBrowserAutomation(
     };
   const toolsExact = health.observed_tools.length > 0
     && lock.mcp.required_tools.every((tool) => health.observed_tools.includes(tool))
-    && health.observed_tools.every((tool) => lock.mcp.required_tools.includes(tool));
+;
   const ready = installed
     && registered
     && registration.enabled
@@ -480,7 +484,7 @@ export function inspectManagedBrowserAutomation(
     surface_kind: 'opl_managed_browser_automation_projection',
     provider_id: lock.provider_id,
     product_name: lock.product_name,
-    version: lock.runtime.package_version,
+    version: packageVersion ?? lock.runtime.package_version,
     owner: lock.owner,
     source_ref: lock.product_policy_source_ref,
     source_sha256: lock.product_policy_source_sha256,
@@ -539,11 +543,35 @@ export function inspectManagedBrowserAutomation(
   };
 }
 
-export function reconcileManagedBrowserAutomation(
-  actionId: ManagedBrowserAutomationActionId,
-): ManagedBrowserAutomationInspection {
-  if (actionId === 'settings_recheck_browser_automation') return inspectManagedBrowserAutomation();
+export function planManagedBrowserAutomationUpdate(options: {
+  resolveRelease?: () => ResolvedDependencyRelease;
+} = {}) {
   const before = inspectManagedBrowserAutomation({ runExternalChecks: false });
+  if (before.status === 'unsupported_runtime') return { before, target: null, update_available: false };
+  // An explicit operator root is an external carrier and is never auto-replaced.
+  if (process.env.OPL_PLAYWRIGHT_MCP_PACKAGE_ROOT?.trim()) return { before, target: null, update_available: false };
+  const target = options.resolveRelease?.() ?? resolveDependencyReleaseSync('playwright-mcp', { verifyArchive: false });
+  return { before, target, update_available: !before.installed
+    || compareDependencyVersions(before.runtime.package_version ?? '', target.version) < 0 };
+}
+
+export function reconcileManagedBrowserAutomation(actionId: ManagedBrowserAutomationActionId, options: {
+  target?: ResolvedDependencyRelease; refreshLatest?: boolean;
+} = {}): ManagedBrowserAutomationInspection {
+  if (actionId === 'settings_recheck_browser_automation') return inspectManagedBrowserAutomation();
+  let before = inspectManagedBrowserAutomation({ runExternalChecks: false });
+  const target = options.target ?? (options.refreshLatest ? planManagedBrowserAutomationUpdate().target : null);
+  if (target && !process.env.OPL_PLAYWRIGHT_MCP_PACKAGE_ROOT?.trim()
+    && (!before.installed || compareDependencyVersions(before.runtime.package_version ?? '', target.version) < 0)) {
+    const prefix = path.join(resolveOplStatePaths().state_dir, 'managed-browser-automation', 'runtime');
+    fs.mkdirSync(prefix, { recursive: true });
+    const installed = spawnSync('npm', ['install', '--prefix', prefix, `@playwright/mcp@${target.version}`, '--no-audit', '--no-fund'], {
+      encoding: 'utf8', stdio: 'pipe', timeout: 300_000,
+    });
+    if (installed.status !== 0) throw new Error(installed.stderr || 'Managed Playwright MCP installation failed.');
+    before = inspectManagedBrowserAutomation({ runExternalChecks: false });
+    if (before.runtime.package_version !== target.version) throw new Error('Managed Playwright MCP version verification failed.');
+  }
   if (!before.installed || !before.runtime.entrypoint) return before;
   registerOplManagedMcpServer({
     configPath: before.mcp.config_path,
