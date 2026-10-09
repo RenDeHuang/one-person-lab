@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { isRecord } from '../../../kernel/contract-validation.ts';
 import { parseJsonText } from '../../../kernel/json-file.ts';
 import { runtimeRootContainsDescriptor } from '../../../kernel/git-marketplace-runtime-root.ts';
+import { packageSourceArchiveMembersStayWithinRoot, readPackageSourceArchiveEntries } from './package-source-archive.ts';
 import { localReadbackFailure, runConfiguredDownloadWithTransientRetry, stringValue } from './configured-codex-plugin-carrier-native.ts';
 
 const PREFIX = 'application/vnd.onepersonlab.package.';
@@ -198,16 +199,17 @@ export function acquireHostedPackageSource(input: {
   try {
     const archivePath = path.join(temporaryRoot, 'source.tar.gz');
     fs.writeFileSync(archivePath, blob(sourceLayer));
-    const list = spawnSync('tar', ['-tzf', archivePath], { encoding: 'utf8', maxBuffer: MAX_BYTES });
-    const types = spawnSync('tar', ['-tvzf', archivePath], { encoding: 'utf8', maxBuffer: MAX_BYTES });
-    const entries = list.stdout?.split('\n').filter(Boolean) ?? [];
-    if (list.status !== 0 || types.status !== 0 || entries.length === 0
-      || entries.some((entry) => {
-        const normalized = entry.replace(/\/$/, '');
-        return normalized !== archiveRoot && (!normalized.startsWith(`${archiveRoot}/`)
-          || path.posix.normalize(normalized) !== normalized || normalized.includes('\\'));
-      })
-      || types.stdout.split('\n').filter(Boolean).some((entry) => !/^[-d]/.test(entry))) {
+    // Enumerate members from the tar headers directly: the system tar CLI
+    // octal-escapes non-ASCII names under a non-UTF-8 locale, which would make a
+    // physical name look like an injected backslash. See package-source-archive.ts.
+    const entries = (() => {
+      try {
+        return readPackageSourceArchiveEntries(archivePath, archiveRoot);
+      } catch {
+        invalid('Package source archive must contain only physical files within its declared root.');
+      }
+    })();
+    if (!packageSourceArchiveMembersStayWithinRoot(entries, archiveRoot)) {
       return invalid('Package source archive must contain only physical files within its declared root.');
     }
     const extracted = spawnSync('tar', ['-xzf', archivePath, '-C', temporaryRoot], { encoding: 'utf8' });
