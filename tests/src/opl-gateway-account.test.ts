@@ -898,3 +898,32 @@ test('releasing the lock never removes a lock another process republished', asyn
     assert.equal(fs.readFileSync(lockPath, 'utf8'), replacement);
   });
 });
+
+test('dead-owner evidence cannot reclaim a lock replaced during the owner probe', async () => {
+  await withIsolatedGatewayState(async (lockPath) => {
+    const dead = exitedProcessId();
+    fs.writeFileSync(lockPath, `${dead}\n`, { mode: 0o600 });
+    const kill = process.kill;
+    let replaced = false;
+    process.kill = ((pid: number, signal: number) => {
+      if (pid === dead && !replaced) {
+        replaced = true;
+        fs.rmSync(lockPath);
+        fs.writeFileSync(lockPath, `${process.pid}\n`, { mode: 0o600 });
+        throw Object.assign(new Error('old owner exited'), { code: 'ESRCH' });
+      }
+      return kill(pid, signal);
+    }) as typeof process.kill;
+    try {
+      let ran = false;
+      const pending = withGatewayAccountLock(async () => { ran = true; });
+      await sleep(150);
+      assert.equal(replaced, true);
+      assert.equal(ran, false);
+      assert.equal(fs.readFileSync(lockPath, 'utf8'), `${process.pid}\n`);
+      fs.rmSync(lockPath);
+      await pending;
+      assert.equal(ran, true);
+    } finally { process.kill = kill; }
+  });
+});

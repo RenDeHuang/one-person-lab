@@ -43,6 +43,7 @@ function assertPrivatePath(filePath: string, kind: 'directory' | 'file') {
       path: filePath,
     });
   }
+  return stats;
 }
 
 function lstatOrNull(filePath: string) {
@@ -225,14 +226,27 @@ export async function withGatewayAccountLock<T>(operation: () => Promise<T>): Pr
       handle = publishGatewayAccountLock(lockPath);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      assertPrivatePath(lockPath, 'file');
+      let observed: fs.Stats;
+      try {
+        observed = assertPrivatePath(lockPath, 'file');
+      } catch (error) {
+        // A competing reclaimer can remove the old path after EEXIST.
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
       const verdict = gatewayAccountLockOwner(lockPath);
-      const age = Date.now() - fs.lstatSync(lockPath).mtimeMs;
+      const age = Date.now() - observed.mtimeMs;
       // A provably absent owner releases the lock immediately. Waiting for the
       // unattributed grace period instead is what turned a crashed operation
       // into "every Gateway sign-in fails" for the next five minutes.
       if (verdict === 'gone' || (verdict === 'unattributed' && age > UNATTRIBUTED_LOCK_GRACE_MS)) {
-        fs.rmSync(lockPath, { force: true });
+        const current = lstatOrNull(lockPath);
+        // Ownership evidence applies only to the inode inspected above. A
+        // competing operation may already have published its live lock.
+        if (current && current.ino === observed.ino && current.dev === observed.dev
+          && current.mtimeMs === observed.mtimeMs && current.size === observed.size) {
+          fs.rmSync(lockPath, { force: true });
+        }
         continue;
       }
       if (Date.now() >= deadline) {
