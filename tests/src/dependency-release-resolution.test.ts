@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { compareDependencyVersions, resolveDependencyRelease, resolveDependencyReleases } from '../../src/adapters/integration/dependency-release-resolution.ts';
 
 test('dependency version comparison preserves a newer installed release', () => {
@@ -23,4 +24,30 @@ test('batch resolution rejects duplicate identities and freezes each result', as
   const fetch = async () => new Response(JSON.stringify({ version: '1.0.0', app: { url: 'https://example.test/1.0.0/a.zip', sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' } }));
   const [result] = await resolveDependencyReleases(['x'], { policy, platform: 'darwin', architecture: 'arm64', fetch, verifyArchive: false });
   assert.equal(Object.isFrozen(result), true);
+});
+
+test('Full source identity follows the exact release tag rather than target_commitish', async () => {
+  const policy = { schema_version: 'test', sources: { officecli: { kind: 'github-release' as const, repository: 'iOfficeAI/OfficeCLI', source_commit_required: true, asset: 'officecli-mac-arm64' } } };
+  const endpoints: string[] = [];
+  const githubApi = async (endpoint: string) => {
+    endpoints.push(endpoint);
+    return endpoint.endsWith('releases/latest')
+      ? { tag_name: 'v1.0.155', target_commitish: 'main', assets: [{ name: 'officecli-mac-arm64', browser_download_url: 'https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.155/officecli-mac-arm64', digest: 'sha256:' + 'a'.repeat(64), size: 1 }] }
+      : { sha: 'b'.repeat(40) };
+  };
+  const result = await resolveDependencyRelease('officecli', { policy, platform: 'darwin', architecture: 'arm64', githubApi, verifyArchive: false });
+  assert.equal(result.resolved_commit, 'b'.repeat(40));
+  assert.deepEqual(endpoints, ['repos/iOfficeAI/OfficeCLI/releases/latest', 'repos/iOfficeAI/OfficeCLI/commits/v1.0.155']);
+});
+
+test('npm Full source uses the published gitHead and rejects a mismatched repository commit', async () => {
+  const bytes = new TextEncoder().encode('verified npm fixture');
+  const integrity = 'sha512-' + createHash('sha512').update(bytes).digest('base64');
+  const policy = { schema_version: 'test', sources: { mineru: { kind: 'npm' as const, package: 'mineru-open-api', repository: 'opendatalab/MinerU-Ecosystem', source_commit_required: true } } };
+  const fetch = async (url: any) => String(url).endsWith('/latest')
+    ? new Response(JSON.stringify({ version: '0.5.9', gitHead: 'c'.repeat(40), dist: { tarball: 'https://registry.npmjs.org/mineru-open-api/-/mineru-open-api-0.5.9.tgz', integrity } }))
+    : new Response(bytes);
+  const options = { policy, fetch, githubApi: async () => ({ sha: 'c'.repeat(40) }) };
+  assert.equal((await resolveDependencyRelease('mineru', options)).resolved_commit, 'c'.repeat(40));
+  await assert.rejects(() => resolveDependencyRelease('mineru', { ...options, githubApi: async () => ({ sha: 'd'.repeat(40) }) }), /configured repository/);
 });

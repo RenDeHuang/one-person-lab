@@ -17,6 +17,7 @@ export interface DependencyReleaseSource {
   version_path?: string;
   platforms?: Record<string, string>;
   platform_optional_dependency?: string;
+  source_commit_required?: boolean;
   install_metadata?: Record<string, unknown>;
 }
 
@@ -168,6 +169,13 @@ async function resolveNpm(source: DependencyReleaseSource, options: DependencyRe
   if (!source.package) throw new Error('npm dependency source is missing package identity.');
   const artifact = await npmArtifact(source.package, source.dist_tag ?? 'latest', options);
   const version = stableVersion(artifact.version, '');
+  let resolvedCommit: string | undefined;
+  if (source.source_commit_required) {
+    if (!source.repository || !/^[a-f0-9]{40}$/.test(artifact.metadata.gitHead ?? '')) throw new Error('npm release is missing its required source commit.');
+    const commit = await github(`repos/${source.repository}/commits/${artifact.metadata.gitHead}`, options);
+    if (commit.sha !== artifact.metadata.gitHead) throw new Error('npm source commit does not belong to the configured repository.');
+    resolvedCommit = commit.sha;
+  }
   const install: Json = { ...source.install_metadata, npm: Object.fromEntries(Object.entries(artifact).filter(([key]) => key !== 'metadata')) };
   if (source.platform_optional_dependency) {
     const key = expand(source.platform_optional_dependency, substitutions(platform, architecture));
@@ -182,7 +190,7 @@ async function resolveNpm(source: DependencyReleaseSource, options: DependencyRe
     if (platformArtifact.version !== selector) throw new Error('npm platform dependency did not resolve the selected exact version.');
     install.npm_platform = Object.fromEntries(Object.entries(platformArtifact).filter(([entry]) => entry !== 'metadata'));
   }
-  return { version, source_ref: artifact.source_ref, archive_url: artifact.tarball_url,
+  return { version, source_ref: artifact.source_ref, ...(resolvedCommit ? { resolved_commit: resolvedCommit } : {}), archive_url: artifact.tarball_url,
     archive_sha256: artifact.tarball_sha256, archive_size_bytes: artifact.tarball_size_bytes,
     npm_integrity: artifact.npm_integrity, install_metadata: install };
 }
@@ -210,8 +218,14 @@ async function resolveGithub(source: DependencyReleaseSource, options: Dependenc
   }
   if (!asset?.browser_download_url) throw new Error(`Release has no selected platform archive for ${platform}/${architecture}.`);
   const archiveUrl = httpsUrl(asset.browser_download_url);
+  let resolvedCommit: string | undefined;
+  if (source.source_commit_required) {
+    const commit = await github(`repos/${source.repository}/commits/${encodeURIComponent(release.tag_name)}`, options);
+    if (!/^[a-f0-9]{40}$/.test(commit.sha ?? '')) throw new Error('GitHub release tag is missing its required source commit.');
+    resolvedCommit = commit.sha;
+  }
   const bytes = await fingerprint(archiveUrl, sha256(asset.digest), typeof asset.size === 'number' ? asset.size : undefined, undefined, options);
-  return { version, source_ref: release.html_url ?? `https://github.com/${source.repository}/releases/tag/${release.tag_name}`,
+  return { version, source_ref: release.html_url ?? `https://github.com/${source.repository}/releases/tag/${release.tag_name}`, ...(resolvedCommit ? { resolved_commit: resolvedCommit } : {}),
     archive_url: archiveUrl, ...bytes,
     install_metadata: { ...source.install_metadata, release_tag: release.tag_name, asset_name: asset.name } };
 }
