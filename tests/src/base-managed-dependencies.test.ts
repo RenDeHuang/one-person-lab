@@ -39,6 +39,25 @@ function executable(filePath: string, output: string) {
   fs.writeFileSync(filePath, `#!/usr/bin/env bash\necho ${JSON.stringify(output)}\n`, { mode: 0o755 });
 }
 
+// Exercise the official release resolver without local credentials or live network.
+function githubReleaseFixture(root: string, repository: string, version: string, assetName: string, marker?: string) {
+  const binary = path.join(root, 'bin', 'gh');
+  const release = JSON.stringify({
+    tag_name: `v${version}`, prerelease: false, draft: false,
+    html_url: `https://github.com/${repository}/releases/tag/v${version}`,
+    assets: [{ name: assetName, browser_download_url: `https://github.com/${repository}/releases/download/v${version}/${assetName}`,
+      digest: `sha256:${'a'.repeat(64)}`, size: 1 }],
+  });
+  fs.mkdirSync(path.dirname(binary), { recursive: true });
+  fs.writeFileSync(binary, [
+    '#!/usr/bin/env bash',
+    `if [ "$*" != "api repos/${repository}/releases/latest" ]; then exit 1; fi`,
+    ...(marker ? [`echo called >> '${marker.replaceAll("'", "'\\''")}'`] : []),
+    `cat <<'OPL_RELEASE_FIXTURE'`, release, 'OPL_RELEASE_FIXTURE', '',
+  ].join('\n'), { mode: 0o755 });
+  return path.dirname(binary);
+}
+
 function toolInstaller(filePath: string, binaryName: string, versionCommand: string, versionOutput: string) {
   fs.writeFileSync(filePath, [
     '#!/usr/bin/env bash',
@@ -647,12 +666,13 @@ test('verified Homebrew Temporal CLI reports currentness without inferring Tempo
     'if [ "$*" = "info --json=v2 temporal" ]; then echo \"{\\\"formulae\\\":[{\\\"versions\\\":{\\\"stable\\\":\\\"1.1.0\\\"}}]}\"; fi',
     '',
   ].join('\n'), { mode: 0o755 });
+  const fixturePath = githubReleaseFixture(root, 'temporalio/cli', '1.8.1', `temporal_cli_1.8.1_${process.platform}_${process.arch === 'x64' ? 'amd64' : process.arch}.tar.gz`);
   try {
     withEnvironment({
       OPL_HOMEBREW_BIN: brew,
       OPL_TEMPORAL_BIN: temporal,
       OPL_TEMPORAL_CLI_LATEST_VERSION: undefined,
-      PATH: '/usr/bin:/bin',
+      PATH: `${fixturePath}:/usr/bin:/bin`,
     }, () => {
       const installation = inspectExternalTemporalInstallation({ refreshLatest: true });
       assert.equal(installation.ownership, 'homebrew_formula');
@@ -666,7 +686,7 @@ test('verified Homebrew Temporal CLI reports currentness without inferring Tempo
   }
 });
 
-test('Temporal CLI stable cohort outranks stale Homebrew metadata and ignores prerelease hints', () => {
+test('Temporal CLI official release outranks stale Homebrew metadata and ignores prerelease hints', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-external-temporal-stable-cohort-'));
   const brew = path.join(root, 'bin', 'brew');
   const temporal = path.join(root, 'Cellar', 'temporal', '1.8.0', 'bin', 'temporal');
@@ -678,12 +698,13 @@ test('Temporal CLI stable cohort outranks stale Homebrew metadata and ignores pr
     'if [ "$*" = "info --json=v2 temporal" ]; then echo \'{"formulae":[{"versions":{"stable":"1.8.0"}}]}\'; fi',
     '',
   ].join('\n'), { mode: 0o755 });
+  const fixturePath = githubReleaseFixture(root, 'temporalio/cli', '1.8.1', `temporal_cli_1.8.1_${process.platform}_${process.arch === 'x64' ? 'amd64' : process.arch}.tar.gz`);
   try {
     withEnvironment({
       OPL_HOMEBREW_BIN: brew,
       OPL_TEMPORAL_BIN: temporal,
       OPL_TEMPORAL_CLI_LATEST_VERSION: '1.9.0-rc.1',
-      PATH: '/usr/bin:/bin',
+      PATH: `${fixturePath}:/usr/bin:/bin`,
     }, () => {
       const installation = inspectExternalTemporalInstallation({ refreshLatest: true });
       assert.equal(installation.version, '1.8.0');
@@ -766,17 +787,10 @@ test('cached Base status skips companion latest network lookup while explicit re
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-managed-companion-cached-status-'));
   const stateRoot = path.join(root, 'state');
   const office = path.join(stateRoot, 'base-dependencies', '.local', 'bin', 'officecli');
-  const fakeGit = path.join(root, 'bin', 'git');
-  const marker = path.join(root, 'git-called');
+  const marker = path.join(root, 'release-called');
   executable(office, 'officecli 1.0.1');
   const pluginBin = writeFlowDependencyDescriptor(root, ['opl-base', 'officecli']);
-  fs.mkdirSync(path.dirname(fakeGit), { recursive: true });
-  fs.writeFileSync(fakeGit, [
-    '#!/usr/bin/env bash',
-    `echo called >> ${JSON.stringify(marker)}`,
-    'echo "0000000000000000000000000000000000000000 refs/tags/v1.0.2"',
-    '',
-  ].join('\n'), { mode: 0o755 });
+  const fixturePath = githubReleaseFixture(root, 'iOfficeAI/OfficeCLI', '1.0.2', `officecli-${process.platform === 'darwin' ? 'mac' : process.platform}-${process.arch}`, marker);
   try {
     withEnvironment({
       CODEX_HOME: path.join(root, 'codex-home'),
@@ -785,7 +799,7 @@ test('cached Base status skips companion latest network lookup while explicit re
       OPL_COMPANION_SKIP_LATEST_LOOKUP: undefined,
       OPL_OFFICECLI_LATEST_VERSION: undefined,
       OPL_CODEX_PLUGIN_BIN: pluginBin,
-      PATH: `${path.dirname(fakeGit)}:/usr/bin:/bin`,
+      PATH: `${fixturePath}:/usr/bin:/bin`,
     }, () => {
       const cached = inspectBaseManagedDependencies(root);
       assert.equal(cached.dependencies.find((entry) => entry.dependency_id === 'officecli')?.currentness, 'unknown');
