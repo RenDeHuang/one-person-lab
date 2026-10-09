@@ -11,6 +11,18 @@ export function managedTemporalCliPath(root = resolveOplStatePaths().state_dir) 
   return path.join(root, 'base-dependencies', 'temporal-cli', 'bin', 'temporal');
 }
 
+// A dangling symlink, a partially written download, and a non-executable file
+// all report as "present" to lstat and as "unusable" to a run check. They are
+// owner state, not installation targets.
+function existsButCannotRun(candidate: string) {
+  try { fs.lstatSync(candidate); } catch { return false; }
+  try {
+    if (!fs.statSync(candidate).isFile()) return true;
+    fs.accessSync(candidate, fs.constants.X_OK);
+    return false;
+  } catch { return true; }
+}
+
 function binaryVersion(binary: string, run: typeof execFileSync = execFileSync) {
   try { return String(run(binary, ['--version'], { encoding: 'utf8', timeout: 8000 })).match(/\d+\.\d+\.\d+/)?.[0] ?? null; }
   catch { return null; }
@@ -40,16 +52,22 @@ export function installTemporalCli(options: {
   if (!['darwin', 'linux', 'win32'].includes(platform)) return { status: 'not_applicable' };
   const run = options.run ?? execFileSync;
   const root = options.root ?? (options.homeDir ? path.join(options.homeDir, '.opl-state') : resolveOplStatePaths().state_dir);
-  const destination = options.root ? managedTemporalCliPath(root) : path.join(options.homeDir ?? os.homedir(), '.local/bin/temporal');
+  const homeDir = options.homeDir ?? os.homedir();
+  const userTemporalPath = path.join(homeDir, '.local/bin/temporal');
+  const destination = options.root ? managedTemporalCliPath(root) : userTemporalPath;
+  // Check the user-owned path unconditionally. It is both a reuse source and -
+  // when no managed root is configured - the destination itself, which the reuse
+  // scan skips. Leaving the check inside that loop made it unreachable exactly
+  // when it mattered, and the install then renamed over the owner's entry.
+  if (existsButCannotRun(userTemporalPath)) {
+    throw new Error('Existing user Temporal CLI is not executable; preserve it for its owner.');
+  }
   // Existing user executables remain owner-controlled. Initial service bootstrap may reuse them.
   if (options.reuseExternal !== false && !fs.existsSync(destination)) {
-    const homeDir = options.homeDir ?? os.homedir();
     for (const candidate of [...(options.searchPath ?? process.env.PATH ?? '').split(path.delimiter).filter(Boolean)
-      .map(dir => path.join(dir, 'temporal')), path.join(homeDir, '.local/bin/temporal')]) {
+      .map(dir => path.join(dir, 'temporal')), userTemporalPath]) {
       if (path.resolve(candidate) === path.resolve(destination)) continue;
       try { fs.accessSync(candidate, fs.constants.X_OK); return { status: 'reused', path: candidate }; } catch {}
-      try { fs.lstatSync(candidate); if (candidate === path.join(homeDir, '.local/bin/temporal')) throw new Error('Existing user Temporal CLI is not executable; preserve it for its owner.'); }
-      catch (error) { if (error instanceof Error && error.message.includes('preserve')) throw error; }
     }
   }
   const cohort = options.cohort?.cli;
