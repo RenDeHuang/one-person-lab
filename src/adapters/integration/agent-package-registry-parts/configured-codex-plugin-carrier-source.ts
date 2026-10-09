@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { isRecord } from '../../../kernel/contract-validation.ts';
 import { parseJsonText } from '../../../kernel/json-file.ts';
 import { runtimeRootContainsDescriptor } from '../../../kernel/git-marketplace-runtime-root.ts';
-import { packageSourceArchiveMembersStayWithinRoot, readPackageSourceArchiveEntries } from './package-source-archive.ts';
+import { extractPackageSourceArchive, packageSourceArchiveMembersStayWithinRoot, readPackageSourceArchiveEntries } from './package-source-archive.ts';
 import { localReadbackFailure, runConfiguredDownloadWithTransientRetry, stringValue } from './configured-codex-plugin-carrier-native.ts';
 
 const PREFIX = 'application/vnd.onepersonlab.package.';
@@ -212,8 +212,11 @@ export function acquireHostedPackageSource(input: {
     if (!packageSourceArchiveMembersStayWithinRoot(entries, archiveRoot)) {
       return invalid('Package source archive must contain only physical files within its declared root.');
     }
-    const extracted = spawnSync('tar', ['-xzf', archivePath, '-C', temporaryRoot], { encoding: 'utf8' });
-    if (extracted.status !== 0) return invalid('Package source archive extraction failed.');
+    try {
+      extractPackageSourceArchive(archivePath, temporaryRoot);
+    } catch {
+      return invalid('Package source archive extraction failed.');
+    }
     const sourceRoot = path.join(temporaryRoot, archiveRoot);
     // Some owners keep their descriptor in the declared plugin source directory.
     // The payload is already bound to the selected owner, commit and OCI digest.

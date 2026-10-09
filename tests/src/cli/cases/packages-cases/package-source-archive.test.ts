@@ -1,8 +1,9 @@
 import { assert, fs, os, path, test } from './helpers.ts';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   packageSourceArchiveMembersStayWithinRoot,
   readPackageSourceArchiveEntries,
+  extractPackageSourceArchive,
 } from '../../../../../src/adapters/integration/agent-package-registry-parts/package-source-archive.ts';
 
 function buildArchive(root: string, entries: Record<string, 'file' | 'directory' | 'symlink'>, archivePath: string) {
@@ -49,6 +50,35 @@ test('package source archive reader is locale-independent for non-ASCII member n
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('archive validation uses the effective PAX path rather than the harmless ustar name', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-package-source-pax-'));
+  try {
+    const archivePath = path.join(root, 'source.tar.gz');
+    // Python's independent standard archive writer emits a PAX path override
+    // with a safe physical header name. System tar honors that override too.
+    execFileSync('python3', ['-c',
+      'import io,sys,tarfile\nwith tarfile.open(sys.argv[1],"w:gz",format=tarfile.PAX_FORMAT) as t:\n i=tarfile.TarInfo("med-autocast/safe.txt");i.size=1;i.pax_headers={"path":"../escape.txt"};t.addfile(i,io.BytesIO(b"x"))', archivePath]);
+    const entries = readPackageSourceArchiveEntries(archivePath, 'med-autocast');
+    assert.equal(entries[0].path, '../escape.txt');
+    assert.equal(packageSourceArchiveMembersStayWithinRoot(entries, 'med-autocast'), false);
+    assert.equal(fs.existsSync(path.join(root, '..', 'escape.txt')), false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('long non-ASCII PAX paths validate and extract with the same structured reader', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opl-package-source-long-'));
+  try {
+    const archivePath = path.join(root, 'source.tar.gz');
+    const name = `docs/${'方法'.repeat(50)}.md`;
+    buildArchive(root, { [name]: 'file' }, archivePath);
+    const entries = readPackageSourceArchiveEntries(archivePath, 'med-autocast');
+    assert.equal(entries.some((entry) => entry.path === `med-autocast/${name}`), true);
+    assert.equal(packageSourceArchiveMembersStayWithinRoot(entries, 'med-autocast'), true);
+    extractPackageSourceArchive(archivePath, root);
+    assert.equal(fs.readFileSync(path.join(root, 'med-autocast', name), 'utf8'), 'x');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test('package source archive reader rejects non-physical member types', () => {
